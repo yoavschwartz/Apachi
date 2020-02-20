@@ -1,0 +1,90 @@
+theory x
+begin
+
+/*
+ *  Author: 
+ *  Model Name: x.spthy
+ *  Status: DEVELOPMENTAL
+ *
+ */
+
+builtins: symmetric-encryption, hashing, asymmetric-encryption, revealing-signing
+functions: commit/2
+
+/*
+ * Setting up our own secure, authenticated and replay resistant channels.
+ * A: Sender
+ * B: Receiver
+ * x: message
+ */
+rule Secure_channel_out:
+        [ Out_Secure($A,$B,x) ]
+      --[ NotEq($A, $B)]->
+        [ Secure($A,$B,x) ]
+
+rule Secure_channel_in:
+        [ Secure($A,$B,x) ]
+      --[ NotEq($A, $B)]->
+        [ In_Secure($A,$B,x) ]
+
+/*
+1. Submitter send paper and abstract to S
+2. S sends submitter a receipt
+3. S sends papers to PC
+4. PC publicly commits to submitted papers and whether or not they will go forward in the process
+*/
+
+
+// Initializes a single Receiver (only once), and allows unbound number of Sender and PO.
+rule Setup: 
+    let 
+    server_pubk = pk(~server_privk)
+    pc_pubk = pk(~pc_privk)
+    in
+    [Fr(~server_privk)]
+  --[OnlyOnceWith('Setup')]->
+    [Setup_Submitter($Server, server_pubk, pc_pubk), 
+     Setup_PC($PC, ~pc_privk, $Server, server_pubk), 
+     Setup_Server($Server, ~server_privk, $PC)]
+
+rule Setup_submitter:
+    let
+    server_pubk = pk(~server_privk)
+    pc_pubk = pk(~pc_privk)
+    in
+    [Setup_Submitter($Server, server_pubk, pc_pubk), Fr(~paper), Fr(~abstract), Fr(~key)]
+  --[]->
+    [!Submitter($Submitter, ~paper, ~abstract, ~key, $Server, server_pubk, pc_pubk)]
+
+
+rule Setup_pc:
+    let
+    server_pubk = pk(~server_privk)
+    in
+    [Setup_PC($PC, ~pc_privk, $Server, server_pubk)]
+  --[]->
+    [!PC($PC, ~pc_privk, $Server, server_pubk)]
+
+rule Setup_pc:
+    [Setup_Server($Server, ~server_privk, $PC)]
+  --[]->
+    [!Server($Server, ~server_privk, $PC)]
+
+
+//Restrictions
+restriction Eq:
+" All x y #i. Eq(x,y) @i ==> x = y
+    
+"
+
+restriction NotEq:
+" All x y #i. NotEq(x,y) @i ==> not(x = y)
+    
+"
+
+restriction OnlyOnceWith:
+" All x #i #j. OnlyOnceWith(x) @i & OnlyOnceWith(x) @j ==> #i=#j
+    
+"
+
+end
