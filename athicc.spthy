@@ -1,0 +1,596 @@
+theory athicc
+begin
+
+/*
+ *  Author: 
+ *  Model Name: athicc.spthy
+ *  Status: DEVELOPMENTAL
+ *
+ */
+
+builtins: symmetric-encryption, hashing, asymmetric-encryption, signing
+functions: upload_token_association/2 [private], verify_upload_download/2, verify_receipt/2
+equations: 
+	verify_upload_download(<A, pub_k, h(<d_id, u_id>), u_id>, <A, pub_k, d_id>) = true,
+	verify_receipt(<enc_m, sign(h(enc_m), priv_k), A, pk(priv_k)>, pk(priv_k)) = true
+
+/*
+ * Setting up our own secure, authenticated and replay resistant channels.
+ * A: Sender
+ * B: Receiver
+ * x: message
+ */
+rule Secure_channel_out:
+        [ Out_Secure($A,$B,x) ]
+      --[ NotEq($A, $B)]->
+        [ Secure($A,$B,x) ]
+
+rule Secure_channel_in:
+        [ Secure($A,$B,x) ]
+      --[ NotEq($A, $B)]->
+        [ In_Secure($A,$B,x) ]
+
+#ifdef AdversaryIn
+/*
+ * Allow adversary to in on the secure channel
+ */
+rule Adversary_in:
+        [ In(<$A, $B, x>) ]
+      --[ AdversaryIn($A, $B, x) ]->
+        [ Secure($A, $B, x) ]
+#endif
+
+#ifdef Adversary
+
+/* Adversary knowledge rules */
+
+// Allows the adversary to gain access to a download_token
+rule Reveal_download_token:
+    let 
+    po_pubk = pk(~po_privk)
+    download_token = <$PO, po_pubk, d_id>
+    in
+    [!Association_State_PO(download_token, $PO, ~po_privk, po_pubk)]
+  --[RevealDownloadToken(download_token),
+     DishonestPO($PO),
+     DishonestActor()]->
+    [Out(d_id)]
+
+// Allows the adversary to gain access to an association of an upload_token and the Receiver
+rule Reveal_upload_token_association:
+	let 
+    upload_token = <$A, pk(priv_k), h(<d_id, ~u_id>), ~u_id>
+	association = upload_token_association(upload_token, $Receiver)
+	in
+    [!Upload_Token_Association(upload_token, $Sender, $Receiver)]
+  --[RevealUploadTokenAssociation(association),
+  	 DishonestActor()]->
+    [Out(association)]
+
+rule Reveal_upload_token:
+    let
+    upload_token = <$A, pk(priv_k), h(<d_id, ~u_id>), ~u_id>
+    in
+    [!Sender_Upload_Token_Association($Sender, upload_token)]
+  --[RevealUploadToken(upload_token),
+ 	 DishonestActor()]->
+    [Out(<h(<d_id, ~u_id>), ~u_id>)]
+
+rule Reveal_symmetric_key:
+    [!Sender_Receiver_Association($Sender, $Receiver, ~key)]
+  --[RevealSymmetricKey($Sender, ~key),
+  	 DishonestActor()]->
+    [Out(~key)]
+
+rule Reveal_po_privk:
+    [!PO_Private_Key($PO, ~po_privk)]
+  --[RevealPOPrivateKey($PO, ~po_privk), 
+     DishonestPO($PO),
+     DishonestActor()]->
+    [Out(~po_privk)]
+
+rule CreateNewDownloadUploadAssociation:
+    let
+    upload_token_association = upload_token_association(<$A, pub_k, h(<d_id, u_id1>), u_id1>, $R)
+    download_token = <$A, pub_k, d_id>
+    upload_token = <$A, pub_k, h(<d_id, u_id2>), u_id2>
+    new_association = upload_token_association(<$A, pub_k, h(<d_id, u_id2>), u_id2>, $R)
+    in
+    [In(<upload_token_association, download_token, upload_token>)]
+  --[OnlyOnceWith(d_id)]->
+    [Out(new_association)]
+
+#endif
+
+rule PO_Consume_Message:
+    let
+    encrypted_message = senc(<~message, 'OK'>, ~key)
+    upload_token = <$A, pk(priv_k), h(<d_id, ~u_id>), ~u_id>
+    in
+    [PO_Received_Message(encrypted_message, upload_token)]
+  --[MessageDenied(encrypted_message, upload_token),
+     DishonestPO($A),
+     DishonestActor()]->
+    []
+
+/*
+AnB
+Sender, Receiver, PO
+
+1. Receiver -> PO: 'POAssociation'
+    PO generates download_token = <PO, po_pubk, download_identifier>
+2. PO -> Receiver: download_token
+    Receiver generates upload_token = <PO, po_pubk, h(<download_identifier, upload_identifier>), upload_identifier>
+3. Receiver -> Sender: upload_token
+4. Sender -> PO: {m}k(SenderReciever), upload_token
+    Receipt = {m}k(SenderReciever), sign(h({m}k(SenderReciever))), PO, po_pubk
+5. PO -> Sender: receipt
+6. Receiver -> PO: download_token
+7. PO -> Receiver: {m}k(SenderReciever), upload_token
+8. Sender -> Receiver: receipt
+
+*/
+
+// Initializes a single Receiver (only once), and allows unbound number of Sender and PO.
+rule Setup: 
+    []
+  --[OnlyOnceWith('Setup')]->
+    [!Setup_Sender($Receiver),
+     !Setup_PO($Receiver)]
+
+// Initializes a Sender with a Receiver. Generates a symmetric key between them.
+rule Setup_sender:
+    [!Setup_Sender($Receiver), 
+     Fr(~key)]
+  --[SenderRecieverAssociationEvent($Sender, $Receiver, ~key),
+   	 NotEq($Sender, $Receiver),
+     OnlyOnceWith(<$Sender, $Receiver>)]->
+    [!Sender_Receiver_Association($Sender, $Receiver, ~key)]
+
+// Initializes a PO with a private public key pair. Makes a fact of the association between the PO and the Receiver.
+rule Setup_po:
+    let 
+    po_pubk = pk(~po_privk)
+    in
+    [!Setup_PO($Receiver), 
+     Fr(~po_privk)]
+  --[NotEq($PO, $Receiver),
+     OnlyOnceWith(<$PO, $Receiver>)]->
+    [Initial_State_PO($PO, ~po_privk, po_pubk),
+     !PO_Receiver_Knowledge($PO, $Receiver, po_pubk),
+     !PO_Private_Key($PO, ~po_privk), Out(po_pubk)]
+
+/*
+ * Embodies the Sender side of the 3rd step of the protocol
+ * The Sender receives an upload token for a PO.
+ */
+rule Sender_1:
+    let
+    upload_token = <$PO, pk(priv_k), h(<download_identifier, ~upload_identifier>), ~upload_identifier>
+    in
+    [!Sender_Receiver_Association($Sender, $Receiver, ~key),
+     In_Secure($Receiver, $Sender, upload_token)]
+  --[]->
+    [!Upload_Token_Association(upload_token, $Sender, $Receiver)]
+
+/*
+ * Embodies the Sender side of the 4th step of the protocol
+ * The Sender generates and sends a message to the PO.
+ */
+rule Sender_2:
+    let
+    upload_token = <$PO, po_pubk, h(<download_identifier, ~upload_identifier>), ~upload_identifier>
+    encrypted_message = senc(<~message, 'OK'>, ~key)
+    in
+    [!Sender_Receiver_Association($Sender, $Receiver,~key),
+     !Upload_Token_Association(upload_token, $Sender, $Receiver),
+     Fr(~message)]
+  --[SentMessage($Sender,$PO, ~message),
+      SentEncryptedMessage($Sender, encrypted_message, upload_token),
+      MessageToBeSent(~message)]->
+    [Out_Secure($Sender, $PO, <encrypted_message, upload_token>), 
+     Sender_Waiting_For_Receipt($Sender, ~message, upload_token)]
+
+/*
+ * Embodies the Sender side of the 5th and 8th steps of the protocol
+ * The Sender receives a receipt from the PO, and sends the receipt to the Receiver.
+ */
+rule Sender_3:
+    let
+    upload_token = <$PO, po_pubk, h(<download_identifier, ~upload_identifier>), ~upload_identifier>
+    receipt = <encrypted_message, sign(h(encrypted_message), ~po_privk), $PO, po_pubk>
+    in
+    [Sender_Waiting_For_Receipt($Sender, ~message, upload_token),
+     !Sender_Receiver_Association($Sender, $Receiver,~key),
+     In_Secure($PO, $Sender, receipt)]
+  --[Eq(verify_receipt(receipt, po_pubk), true),
+  	 Eq(senc(<~message, 'OK'>, ~key), encrypted_message)]->
+    [Out_Secure($Sender, $Receiver, receipt)]
+
+
+/*
+ * Embodies the PO side of the 1st and 2nd steps of the protocol
+ * The PO receives an 'associate_PO' request, and sends a generated download token.
+ */
+
+
+rule PO_1:
+	let 
+	po_pubk = pk(~po_privk)
+	download_token = <$PO, po_pubk, ~download_identifier>
+	in
+    [In_Secure($Receiver, $PO, 'associate_PO'),
+     Fr(~download_identifier),
+     Initial_State_PO($PO, ~po_privk, po_pubk)]
+  --[]->
+    [Out_Secure($PO, $Receiver, download_token),
+     !Association_State_PO(download_token, $PO, ~po_privk, po_pubk)]
+
+/*
+ * Embodies the PO side of the 4th and 5th steps of the protocol
+ * The PO receives a message from a Sender, and generates and sends a receipt.
+ */
+rule PO_2:
+    let
+    po_pubk = pk(~po_privk)
+    download_token = <$PO, po_pubk, download_identifier>
+    upload_token = <$PO, po_pubk, h(<download_identifier, ~upload_identifier>), ~upload_identifier>
+    receipt = <encrypted_message, sign(h(encrypted_message), ~po_privk), $PO, po_pubk>
+    in
+    [!Association_State_PO(download_token, $PO, ~po_privk, po_pubk),
+     In_Secure($Sender, $PO, <encrypted_message, upload_token>)]
+  --[POReceiveMessageEvent(encrypted_message, upload_token),
+     POReceiveMessage(encrypted_message),
+     Eq(verify_upload_download(upload_token, download_token), true)]->
+    [PO_Received_Message(encrypted_message, upload_token),
+     Out_Secure($PO, $Sender, receipt)]
+
+// Comment to self: Figure out how to make a mutable message array
+
+/*
+ * Embodies the PO side of the 6th and 7th steps of the protocol
+ * The PO receives a download_token from the Receiver, and sends a message and the upload token used for that message.
+ */
+rule PO_3:
+    let
+    po_pubk = pk(~po_privk)
+    download_token = <$PO, po_pubk, download_identifier>
+    upload_token = <$PO, po_pubk, h(<download_identifier, ~upload_identifier>), ~upload_identifier>
+    in
+    [In_Secure($Receiver, $PO, download_token),
+     PO_Received_Message(encrypted_message, upload_token),
+     !Association_State_PO(download_token, $PO, ~po_privk, po_pubk)]
+  --[Eq(verify_upload_download(upload_token, download_token), true)]->
+    [Out_Secure($PO, $Receiver, <encrypted_message, upload_token>)]
+
+/*
+ * Embodies the Receiver side of the 1st step of the protocol
+ * The Receiver sends an 'associate_PO' message to a PO. This is restricted to happens once per PO.
+ */
+rule Receiver_1:
+    let
+    po_pubk = pk(~po_privk)
+    in
+    [!PO_Receiver_Knowledge($PO, $Receiver, po_pubk)]
+  --[OnlyOnceWith($PO)]->
+    [Out_Secure($Receiver, $PO, 'associate_PO'),
+     Receiver_Waiting_For_Download_Token($Receiver, $PO, po_pubk)]
+
+/*
+ * Embodies the Receiver side of the 2nd step of the protocol
+ * The Receiver receives a download_token and saves the association.
+ */
+rule Receiver_2:
+    let
+    po_pubk = pk(~po_privk)
+    download_token =  <$PO, po_pubk, download_identifier>
+    in
+    [Receiver_Waiting_For_Download_Token($Receiver, $PO, po_pubk),
+     In_Secure($PO, $Receiver, download_token)]
+  --[ReceiverDownloadToken(download_token, $Receiver)]->
+    [!POReceiver_Association($Receiver, download_token)]
+
+/*
+ * Embodies the Receiver side of the 2nd and 3rd steps of the protocol
+ * The Receiver receives a download_token and generates an upload token, the receiver then sends out the upload token to a Sender.
+ * Restricted to only happen once for a pair of <Sender, PO>
+ */
+rule Receiver_3:
+    let
+    download_token =  <$PO, po_pubk, download_identifier>
+    upload_token = <$PO, po_pubk, h(<download_identifier, ~upload_identifier>), ~upload_identifier>
+    in
+    [!POReceiver_Association($Receiver, download_token),
+     !Sender_Receiver_Association($Sender, $Receiver, ~key),
+      Fr(~upload_identifier)]
+  --[CreatedUploadedToken(upload_token),
+     UploadTokenAssociationEvent($Sender, upload_token),
+     OnlyOnceWith(<$Sender, $PO>)]->
+    [!Sender_Upload_Token_Association($Sender, upload_token),
+     Out_Secure($Receiver, $Sender, upload_token)]
+
+/*
+ * Embodies the Receiver side of the 6th step of the protocol
+ * The Receiver sends the PO a download_token.
+ */
+rule Receiver_4:
+    let
+    download_token =  <$PO, po_pubk, download_identifier>
+    in
+    [!POReceiver_Association($Receiver, download_token)]
+  --[ReceiverPickupMessageRequest(download_token)]->
+    [Out_Secure($Receiver, $PO, download_token),
+     Receiver_Waiting_For_Message(download_token)]
+
+/*
+ * Embodies the Receiver side of the 7th step of the protocol
+ * The Receiver receives a message from a PO.
+ */
+rule Receiver_5:
+    let 
+    po_pubk = pk(~po_privk)
+    download_token =  <$PO, po_pubk, download_identifier>
+    upload_token = <$PO, po_pubk, h(<download_identifier, ~upload_identifier>), ~upload_identifier>
+    message_pair = sdec(encrypted_message, ~key)
+    message = fst(message_pair)
+    in
+    [!Sender_Upload_Token_Association($Sender1, upload_token),
+     !Sender_Receiver_Association($Sender2, $Receiver, ~key),
+     Receiver_Waiting_For_Message(download_token), 
+     In_Secure($PO, $Receiver, <encrypted_message, upload_token>)]
+  --[ReceiverReceivedMessage(message),
+     ReceiverReceivedMessageEvent(encrypted_message, upload_token, download_token),
+     Eq(snd(message_pair), 'OK')]->
+    [Receiver_Received_Message($Sender1, message, download_token)]
+
+/*
+ * Embodies the Receiver side of the 8th step of the protocol
+ * The Receiver receives a receipt from a Sender.
+ * We restrict runs of the protocol where the signature doesn't verify or the receipt doesn't match the message.
+ */
+rule Receiver_6:
+    let
+    po_pubk = pk(~po_privk)
+    upload_token = <$PO, po_pubk, h(<download_identifier, ~upload_identifier>), ~upload_identifier>
+    receipt = <encrypted_message, signature, $PO, po_pubk>
+    message_pair = sdec(encrypted_message, ~key)
+    in
+    [!Sender_Receiver_Association($Sender, $Receiver, ~key),
+     !Sender_Upload_Token_Association($Sender, upload_token),
+     In_Secure($Sender, $Receiver, receipt)]
+  --[Eq(verify_receipt(receipt, po_pubk), true),
+     Eq(snd(message_pair), 'OK'),
+     ReceiptReceivedEvent(receipt, upload_token)]->
+    [Receipt_Received($Sender, $Receiver, receipt)]
+/*
+ * Embodies the Receiver side of the 8th step of the protocol
+ * The Receiver receives a receipt from a Sender.
+ * We restrict runs of the protocol where the signature doesn't verify or the receipt doesn't match the message.
+ */
+rule Receiver_7:
+    let
+    po_pubk = pk(~po_privk)
+    encrypted_message = senc(<message, 'OK'>, ~key)
+    receipt = <encrypted_message, signature, $PO, po_pubk>
+    download_token =  <$PO, po_pubk, download_identifier>
+    in
+    [Receiver_Received_Message($Sender, message, download_token),
+     Receipt_Received($Sender, $Receiver, receipt),
+     !Sender_Receiver_Association($Sender, $Receiver, ~key)]
+  --[Eq(verify_receipt(receipt, po_pubk), true),
+  	 Eq(senc(<message, 'OK'>, ~key), encrypted_message),
+   	 ReceiptConfirmed(message),
+   	 ReceiptConfirmedInformation(message, $PO, ~po_privk, $Sender, ~key)]->
+    []
+
+//Restrictions
+
+restriction Eq:
+" All x y #i. Eq(x,y) @i ==> x = y
+    
+"
+
+restriction NotEq:
+" All x y #i. NotEq(x,y) @i ==> not(x = y)
+    
+"
+
+restriction OnlyOnceWith:
+" All x #i #j. OnlyOnceWith(x) @i & OnlyOnceWith(x) @j ==> #i=#j
+    
+"
+//Lemmas
+
+// Sanity Check:
+// Checks that a sender can send a message through a PO with a valid receipt
+#ifdef Sanity
+lemma single_sender_single_message_same_PO:
+exists-trace
+"Ex m k #i #j #k #l.
+    MessageToBeSent(m) @i &
+    POReceiveMessage(senc(<m, 'OK'>, k)) @j &
+    ReceiverReceivedMessage(m) @k &
+    ReceiptConfirmed(m) @l &
+    (#i<#j & #j<#k & #k<#l)
+"
+
+// Sanity Check:
+// Checks that multiple senders can send a message through the same PO
+lemma multiple_senders_via_same_PO:
+exists-trace
+"Ex S1 S2 PO m1 m2 k1 k2 #i #j #k #l #m #n.
+    SentMessage(S1, PO, m1) @i & SentMessage(S2, PO, m2) @j & not(S1 = S2) &
+    POReceiveMessage(senc(<m1, 'OK'>, k1)) @k & POReceiveMessage(senc(<m2, 'OK'>, k2)) @l &
+    ReceiverReceivedMessage(m1) @m & ReceiverReceivedMessage(m2) @n
+"
+// Sanity Check:
+// Checks that multiple senders can send a message through different POs
+lemma multiple_senders_via_different_POs:
+exists-trace
+"Ex S1 S2 PO1 PO2 m1 m2 k1 k2 #i #j #k #l #m #n.
+    SentMessage(S1, PO1, m1) @i & SentMessage(S2, PO2, m2) @j &
+    not(S1 = S2) & not(PO1 = PO2) &
+    POReceiveMessage(senc(<m1, 'OK'>, k1)) @k & POReceiveMessage(senc(<m2, 'OK'>, k2)) @l &
+    ReceiverReceivedMessage(m1) @m & ReceiverReceivedMessage(m2) @n
+"
+
+// Sanity Check:
+// Checks that a sender can send multiple messages through the same PO
+lemma single_sender_multiple_messages_same_PO:
+exists-trace
+"Ex S PO m1 m2 k #i #j #k #l #m #n.
+    SentMessage(S, PO, m1) @i & SentMessage(S, PO, m2) @j & not(m1 = m2) &
+    POReceiveMessage(senc(<m1, 'OK'>, k)) @k & POReceiveMessage(senc(<m2, 'OK'>, k)) @l &
+    ReceiverReceivedMessage(m1) @m & ReceiverReceivedMessage(m2) @n
+"
+
+// Sanity Check:
+// Checks that a sender can send multiple messages through different POs
+lemma single_sender_multiple_messages_different_POs:
+exists-trace
+"Ex S PO1 PO2 m1 m2 k #i #j #k #l #m #n.
+    SentMessage(S, PO1, m1) @i & SentMessage(S, PO2, m2) @j & not(PO1 = PO2) &
+    POReceiveMessage(senc(<m1, 'OK'>, k)) @k & POReceiveMessage(senc(<m2, 'OK'>, k)) @l &
+    ReceiverReceivedMessage(m1) @m & ReceiverReceivedMessage(m2) @n
+"
+#endif
+
+#ifdef MessageConsumptionLemma
+
+restriction CorrectMessageHandling:
+"All enc_m u_id d_id PO po_privk #i #j.
+    ((POReceiveMessageEvent(enc_m, <PO, pk(po_privk), h(<d_id, u_id>), u_id>) @i &
+    ReceiverPickupMessageRequest(<PO, pk(po_privk), d_id>) @j))
+    ==>
+    (Ex #k. (ReceiverReceivedMessageEvent(enc_m, <PO, pk(po_privk), h(<d_id, u_id>), u_id>, <PO, pk(po_privk), d_id>) @k)) |
+    (Ex #k. DishonestPO(PO) @k)
+"
+
+lemma PO_message_deny_accountability_soundness:
+"All enc_m sig PO po_privk d_id u_id #i #j.
+    ReceiverPickupMessageRequest(<PO, pk(po_privk), d_id>) @i &
+    ReceiptReceivedEvent(<enc_m, sig, PO, pk(po_privk)>, <PO, pk(po_privk), h(<d_id, u_id>), u_id>) @j &
+    not(Ex #k. ReceiverReceivedMessageEvent(enc_m, <PO, pk(po_privk), h(<d_id, u_id>), u_id>, <PO, pk(po_privk), d_id>) @k)
+    ==>
+    (Ex #k. DishonestPO(PO) @k)
+"
+
+lemma PO_message_deny_accountability_completeness:
+"All enc_m sig PO po_privk d_id u_id #i #j.
+    ReceiverPickupMessageRequest(<PO, pk(po_privk), d_id>) @i &
+    ReceiptReceivedEvent(<enc_m, sig, PO, pk(po_privk)>, <PO, pk(po_privk), h(<d_id, u_id>), u_id>) @j &
+    not(Ex #k. DishonestPO(PO) @k)
+    ==>
+    Ex #k. ReceiverReceivedMessageEvent(enc_m, <PO, pk(po_privk), h(<d_id, u_id>), u_id>, <PO, pk(po_privk), d_id>) @k
+     
+"
+
+#endif
+
+#ifdef Adversary
+
+/* 
+    For an adversary to learn the association between a download token and a Receiver, it must learn:
+    Receiver
+    download token
+    Association between Receiver and Upload Token 
+*/
+// Should break (doesn't hold in protocol)
+// The PO knows the connection between upload identifiers and a download identifier.
+// The sender knows the connection between a upload identifier and the identity of the Receiver.
+lemma secret_download_token_association:
+"All PO po_pubk d_id u_id R #i #j #l.
+    CreatedUploadedToken(<PO, po_pubk, h(<d_id, u_id>), u_id>) @i &
+    ReceiverDownloadToken(<PO, po_pubk, d_id>, R) @j &
+    K(<<PO, po_pubk, d_id>,
+     	R,
+      	upload_token_association(<PO, po_pubk, h(<d_id, u_id>), u_id>, R)>) @l
+    ==>
+  	Ex #x #y.
+        RevealUploadTokenAssociation(upload_token_association(<PO, po_pubk, h(<d_id, u_id>), u_id>, R)) @x &
+	    RevealDownloadToken(<PO, po_pubk, d_id>) @y
+"
+
+/* 
+    For an adversary to forge an upload token, it must learn:
+    download token
+*/
+//Not to self:
+// This breaks under AdversaryIn since the download token is not signed.
+// Even with signature, this breaks under a malicious PO.
+lemma unforgeability_of_upload_tokens_without_download_tokens:
+"All PO po_privk d_id u_id1 u_id2 R #i #j #k. 
+    (ReceiverDownloadToken(<PO, pk(po_privk), d_id>, R) @i &
+    RevealUploadToken(<PO, pk(po_privk), h(<d_id, u_id1>), u_id1>) @j & 
+    K(<PO, pk(po_privk), h(<d_id, u_id2>), u_id2>) @k & not(u_id1 = u_id2) & j < k)
+    ==>
+    (Ex #x. RevealDownloadToken(<PO, pk(po_privk), d_id>) @x ) |
+    (Ex #x. RevealPOPrivateKey(PO, po_privk) @x ) |
+    (Ex #x. RevealUploadToken(<PO, pk(po_privk), h(<d_id, u_id2>), u_id2>) @x)
+    
+"
+
+/* 
+    For an adversary to forge a message and have it confirmed by the Receiver, it must learn:
+    a valid upload token
+*/
+lemma message_received_not_sent_by_sender_impossible_without_outed_upload_token:
+"All k ut dt m #j.
+	ReceiverReceivedMessageEvent(senc(<m, 'OK'>, k), ut, dt) @j
+	==>
+	(Ex #i. MessageToBeSent(m) @i & i < j) |
+	(Ex #k. RevealUploadToken(ut) @k)
+"
+
+// Should break
+// Checks that it's impossible to reuse the same download identifier twice.
+// This breaks because we don't have a nonce so the receiver can't guarantee freshness of the download identifier
+lemma fresh_download_token:
+"All R d_id1 d_id2 PO1 PO2 po_pubk1 po_pubk2 #i #j. 
+   ReceiverDownloadToken(<PO1, po_pubk1, d_id1>, R) @i & 
+   ReceiverDownloadToken(<PO2, po_pubk2, d_id2>, R) @j & 
+   d_id1 = d_id2
+   ==>
+   #i = #j
+"
+
+lemma mismatch_upload_token_means_misbehaving_sender_or_po_soundness_twopointo:
+exists-trace
+"Ex S R PO po_privk k m d_id u_id1 u_id2 #i #j #k.
+	UploadTokenAssociationEvent(S, <PO, pk(po_privk), h(<d_id, u_id1>), u_id1>) @i & 
+	ReceiverReceivedMessageEvent(senc(<m, 'OK'>, k), <PO, pk(po_privk), h(<d_id, u_id2>), u_id2>, <PO, pk(po_privk), d_id>) @j &
+	SenderRecieverAssociationEvent(S, R, k) @k &
+	not(u_id1 = u_id2)
+"
+
+lemma mismatch_upload_token_means_misbehaving_sender_or_po_completeness_twopointo:
+exists-trace
+"Ex S R PO po_privk k m d_id u_id1 u_id2 #i #j #k.
+	UploadTokenAssociationEvent(S, <PO, pk(po_privk), h(<d_id, u_id1>), u_id1>) @i & 
+	ReceiverReceivedMessageEvent(senc(<m, 'OK'>, k), <PO, pk(po_privk), h(<d_id, u_id2>), u_id2>, <PO, pk(po_privk), d_id>) @j &
+	SenderRecieverAssociationEvent(S, R, k) @k &
+	not(Ex #x. DishonestActor() @x)
+"
+
+lemma mismatch_upload_token_means_misbehaving_sender_or_po_soundness:
+"All S R PO po_privk k m d_id u_id1 u_id2 #i #j #k.
+	UploadTokenAssociationEvent(S, <PO, pk(po_privk), h(<d_id, u_id1>), u_id1>) @i & 
+	ReceiverReceivedMessageEvent(senc(<m, 'OK'>, k), <PO, pk(po_privk), h(<d_id, u_id2>), u_id2>, <PO, pk(po_privk), d_id>) @j &
+	SenderRecieverAssociationEvent(S, R, k) @k &
+	not(u_id1 = u_id2)
+	==>
+	((Ex #x. DishonestActor() @x))
+"
+
+lemma mismatch_upload_token_means_misbehaving_sender_or_po_completeness:
+"All S R PO po_privk k m d_id u_id1 u_id2 #i #j #k.
+	UploadTokenAssociationEvent(S, <PO, pk(po_privk), h(<d_id, u_id1>), u_id1>) @i & 
+	ReceiverReceivedMessageEvent(senc(<m, 'OK'>, k), <PO, pk(po_privk), h(<d_id, u_id2>), u_id2>, <PO, pk(po_privk), d_id>) @j &
+	SenderRecieverAssociationEvent(S, R, k) @k &
+	not(Ex #x. DishonestActor() @x)
+ 	==>
+ 	u_id1 = u_id2
+"
+#endif
+
+end
