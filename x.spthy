@@ -41,7 +41,7 @@ rule Setup:
     server_pubk = pk(~server_privk)
     pc_pubk = pk(~pc_privk)
     in
-    [Fr(~server_privk)]
+    [Fr(~server_privk), Fr(~pc_privk)]
   --[OnlyOnceWith('Setup')]->
     [Setup_Submitter($Server, server_pubk, pc_pubk), 
      Setup_PC($PC, ~pc_privk, $Server, server_pubk), 
@@ -52,24 +52,94 @@ rule Setup_submitter:
     server_pubk = pk(~server_privk)
     pc_pubk = pk(~pc_privk)
     in
-    [Setup_Submitter($Server, server_pubk, pc_pubk), Fr(~paper), Fr(~abstract), Fr(~key)]
+    [Setup_Submitter($Server, server_pubk, pc_pubk)]
   --[]->
-    [!Submitter($Submitter, ~paper, ~abstract, ~key, $Server, server_pubk, pc_pubk)]
-
+    [!Submitter_Ready_To_Submit($Submitter, $Server, server_pubk, pc_pubk)]
 
 rule Setup_pc:
-    let
+  let
     server_pubk = pk(~server_privk)
-    in
+  in
     [Setup_PC($PC, ~pc_privk, $Server, server_pubk)]
   --[]->
     [!PC($PC, ~pc_privk, $Server, server_pubk)]
 
-rule Setup_pc:
+rule Setup_server:
     [Setup_Server($Server, ~server_privk, $PC)]
   --[]->
     [!Server($Server, ~server_privk, $PC)]
 
+rule Submission_1:
+  let
+    server_pubk = pk(~server_privk)
+    pc_pubk = pk(~pc_privk)
+    submission = <senc(<<~paper, ~abstract>, ~commit_randomness>, ~key), aenc(~key, pc_pubk)>
+  in
+    [!Submitter_Ready_To_Submit($Submitter, $Server, server_pubk, pc_pubk),
+     Fr(~paper), Fr(~abstract), Fr(~key), Fr(~commit_randomness)]
+  --[SubmittedPaper(~paper, ~abstract, ~commit_randomness)]->
+    [Out_Secure($Submitter, $Server, submission),
+     Submitter_Did_Submit($Submitter, ~paper, ~abstract, ~key, ~commit_randomness, $Server, server_pubk, pc_pubk)]
+
+rule Submission_2:
+  let
+    receipt = revealSign(submission, ~server_privk)
+  in
+    [!Server($Server, ~server_privk, $PC), In_Secure($Submitter, $Server, submission)]
+  --[]->
+    [Out_Secure($Server, $Submitter, receipt), Out_Secure($Server, $PC, submission)]
+
+rule Submission_3:
+  let
+    server_pubk = pk(~server_privk)
+    pc_pubk = pk(~pc_privk)
+    submission = <senc(<<~paper, ~abstract>, ~commit_randomness>, ~key), aenc(~key, pc_pubk)>
+  in
+    [Submitter_Did_Submit($Submitter, ~paper, ~abstract, ~key, ~commit_randomness, $Server, server_pubk, pc_pubk),
+     In_Secure($Server, $Submitter, receipt)]
+  --[Eq(revealVerify(receipt, submission, pc_pubk), true)]->
+    [Submitter_Ready_For_Response($Submitter, ~paper, ~abstract, ~key, ~commit_randomness, $Server, server_pubk, pc_pubk)]
+
+rule Submission_4:
+  let
+    key = adec(snd(submission), ~pc_privk)
+    decrypted_submission = sdec(fst(submission), key)
+    paper =  fst(fst(decrypted_submission))
+    abstract = snd(fst(decrypted_submission))
+    commit_randomness = snd(decrypted_submission)
+    commit_paper = commit(paper, commit_randomness)
+    commit_abstract = commit(abstract, commit_randomness)
+  in
+    [!PC($PC, ~pc_privk, $Server, server_pubk), In_Secure($Server, $PC, submission)]
+  --[CommitPaper(commit_paper), 
+     CommitAbstract(commit_abstract)]->
+    [Received_Submission(paper, abstract, key, commit_randomness), 
+     Out(<commit_paper, commit_abstract>)]
+
+lemma sanity_one_submission:
+exists-trace
+"Ex p a r #i #j.
+    SubmittedPaper(p, a, r) @i &
+    CommitPaper(commit(p, r)) @j &
+    CommitAbstract(commit(a, r)) @j &
+    i < j
+"
+
+lemma sanity_multiple_submissions:
+exists-trace
+"Ex p1 a1 p2 a2 r1 r2 #i #j #k #l.
+    SubmittedPaper(p1, a1, r1) @i &
+    CommitPaper(commit(p1, r1)) @k &
+    CommitAbstract(commit(a1, r1)) @k &
+    SubmittedPaper(p2, a2, r2) @j &
+    CommitPaper(commit(p2, r2)) @l &
+    CommitAbstract(commit(a2, r2)) @l &
+    not(p1 = p2) &
+    not(a1 = a2) &
+    not(r1 = r2) &
+    i < k &
+    j < l
+"
 
 //Restrictions
 restriction Eq:
