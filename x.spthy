@@ -24,55 +24,36 @@ equations: revealCommit(commit(m, r)) = <m,r>,
  * B: Receiver
  * x: message
  */
-rule Secure_channel_out:
-        [ Out_Secure($A,$B,x) ]
-      --[ NotEq($A, $B)]->
-        [ Secure($A,$B,x) ]
-
-rule Secure_channel_in:
-        [ Secure($A,$B,x) ]
-      --[ NotEq($A, $B)]->
-        [ In_Secure($A,$B,x) ]
-
-
 rule Setup: 
     let 
-    server_pubk = pk(~server_privk)
     pc_pubk = pk(~pc_privk)
     in
-    [Fr(~server_privk), Fr(~pc_privk)]
+    [Fr(~pc_privk)]
   --[OnlyOnceWith('Setup')]->
-    [Setup_Submitter($Server, server_pubk, pc_pubk), 
-     Setup_PC($PC, ~pc_privk, $Server, server_pubk), 
-     Setup_Server($Server, ~server_privk, $PC),
-     !Setup_Reviewer($Server, server_pubk, pc_pubk)]
+    [Setup_Submitter(pc_pubk), 
+     Setup_PC($PC, ~pc_privk), 
+     !Setup_Reviewer(pc_pubk)]
 
 rule Setup_submitter:
     let
-    server_pubk = pk(~server_privk)
     pc_pubk = pk(~pc_privk)
     in
-    [Setup_Submitter($Server, server_pubk, pc_pubk)]
+    [Setup_Submitter(pc_pubk)]
   --[]->
-    [!Submitter_Ready_To_Submit($Submitter, $Server, server_pubk, pc_pubk)]
+    [!Submitter_Ready_To_Submit($Submitter, pc_pubk)]
 
 rule Setup_pc:
-  let
-    server_pubk = pk(~server_privk)
-  in
-    [Setup_PC($PC, ~pc_privk, $Server, server_pubk)]
+    [Setup_PC($PC, ~pc_privk)]
   --[]->
-    [!PC($PC, ~pc_privk, $Server, server_pubk)]
-
-rule Setup_server:
-    [Setup_Server($Server, ~server_privk, $PC)]
-  --[]->
-    [!Server($Server, ~server_privk, $PC), Server_Ready_For_Submission()]
+    [!PC($PC, ~pc_privk)]
 
 rule Setup_reviewer:
-    [!Setup_Reviewer($Server, server_pubk, pc_pubk), Fr(~key), Fr(~reviewer_privk)]
+    let
+    pc_pubk = pk(~pc_privk)
+    in
+    [!Setup_Reviewer(pc_pubk), Fr(~key), Fr(~reviewer_privk)]
   --[]->
-    [!Reviewer_Ready_For_Matching($Reviewer, ~key, ~reviewer_privk, $Server, server_pubk, pc_pubk),
+    [!Reviewer_Ready_For_Matching($Reviewer, ~key, ~reviewer_privk, pc_pubk),
      !PC_Reviewer_Association($Reviewer, ~key, pk(~reviewer_privk))]
 
 /*
@@ -85,7 +66,6 @@ Phase 1: Submission
 
 rule Submission_1_submitter_submits:
   let
-    server_pubk = pk(~server_privk)
     pc_pubk = pk(~pc_privk)
     commit1 = commit(~paper, ~r_paper1)
     commit2 = commit(~paper, ~r_paper2)
@@ -94,36 +74,13 @@ rule Submission_1_submitter_submits:
     commits = <commit1, commit2, commit3, commit4>
     submission = <senc(commits, ~key), aenc(~key, pc_pubk)>
   in
-    [!Submitter_Ready_To_Submit($Submitter, $Server, server_pubk, pc_pubk),
+    [!Submitter_Ready_To_Submit($Submitter, pc_pubk),
      Fr(~paper), Fr(~abstract), Fr(~key), Fr(~r_abstract1), Fr(~r_abstract2), Fr(~r_paper1), Fr(~r_paper2)]
   --[SubmittedPaper(~paper, ~abstract, commits)]->
-    [Out_Secure($Submitter, $Server, submission),
-     Submitter_Did_Submit($Submitter, ~key, commits, $Server, server_pubk, pc_pubk)]
+    [Out(submission),
+     Submitter_Did_Submit($Submitter, ~key, commits, pc_pubk)]
 
-rule Submission_2_server_receives_submissions:
-  let
-    receipt = revealSign(submission, ~server_privk)
-  in
-    [!Server($Server, ~server_privk, $PC),
-     In_Secure($Submitter, $Server, submission),
-     Server_Ready_For_Submission()]
-  --[]->
-    [Out_Secure($Server, $Submitter, receipt),
-     Out_Secure($Server, $PC, submission),
-     Server_Ready_For_Submission()]
-
-rule Submission_3_submitter_receives_receipt:
-  let
-    server_pubk = pk(~server_privk)
-    pc_pubk = pk(~pc_privk)
-    submission = <senc(commits, ~key), aenc(~key, pc_pubk)>
-  in
-    [Submitter_Did_Submit($Submitter, ~key, commits, $Server, server_pubk, pc_pubk),
-     In_Secure($Server, $Submitter, receipt)]
-  --[Eq(revealVerify(receipt, submission, server_pubk), true)]->
-    [Submitter_Ready_For_Response($Submitter, ~key, commits, $Server, server_pubk, pc_pubk)]
-
-rule Submission_4_pc_receives_submission:
+rule Submission_2_pc_receives_submission:
   let
     commit1 = commit(~paper, ~r_paper1)
     commit2 = commit(~paper, ~r_paper2)
@@ -136,23 +93,18 @@ rule Submission_4_pc_receives_submission:
     commit_paper = fstOfQuad(submitted_commits)
     commit_abstract = thrdOfQuad(submitted_commits)
   in
-    [!PC($PC, ~pc_privk, $Server, server_pubk), In_Secure($Server, $PC, submission)]
+    [!PC($PC, ~pc_privk), In(submission)]
   --[CommitPaper(commit_paper), 
-     CommitAbstract(commit_abstract)]->
+     CommitAbstract(commit_abstract),
+     OnlyOnceWith(submission)]->
     [!Received_Submission(submitted_commits, ~key), 
      Out(<commit_paper, commit_abstract>)]
 
-rule Submission_5_submission_closes:
-    [Server_Ready_For_Submission()]
-  --[]->
-    [Server_Ready_For_Matching()]
 
 /*
 Phase 2: Matching
-1. PC sends a list of all abstracts to S
-2. S sends the list to all Reviewers
-3. Reviewers sends a list of bids to S
-4. S sends the list of bids to PC
+1. PC sends a list of all abstracts
+3. Reviewers sends a list of bids
 5. PC publishes the matching and a list of anonymized Reviewers and their bids
 */
 
@@ -162,88 +114,68 @@ rule Matching_1_pc_sends_abstracts:
   in
     [!PC_Reviewer_Association($Reviewer, ~reviewer_key, reviewer_pubk), 
      !Received_Submission(submitted_commits, submitter_key),
-     !PC($PC, ~pc_privk, $Server, server_pubk)]
-  --[OnlyOnceWith(<encrypted_commit, $Reviewer>), PCSendAbstract($Reviewer, revealCommitM(frthOfQuad(submitted_commits)))]->
-    [Out_Secure($PC, $Server, <encrypted_commit, $Reviewer>)]
+     !PC($PC, ~pc_privk)]
+  --[OnlyOnceWith(<encrypted_commit, $Reviewer>)]->
+    [Out(encrypted_commit)]
 
-rule Matching_2_s_forwards_abstracts:
-    [Server_Ready_For_Matching(), 
-     !Server($Server, ~server_privk, $PC),
-     In_Secure($PC, $Server, <encrypted_commit, $Reviewer>)]
-  --[ServerDidSendAbstractToReviewer($Reviewer)]->
-    [Server_Ready_For_Matching(),
-     Out_Secure($Server, $Reviewer, encrypted_commit)]
-
-rule Matching_3_reviewer_sends_bids_to_server:
+rule Matching_2_reviewer_sends_bids:
   let
-    commit = senc(encrypted_commit, ~key)
+    commit = commit(~abstract, ~r_abstract2)
+    encrypted_commit = senc(commit, ~reviewer_key)
     abstract = revealCommitM(commit)
     abstract_r = revealCommitR(commit)
     signed_bid = revealSign(<commit, ~bid>, ~reviewer_privk)
     encrypted_bid = senc(signed_bid, ~key)
   in
-    [!Reviewer_Ready_For_Matching($Reviewer, ~key, ~reviewer_privk, $Server, server_pubk, pc_pubk),
-     In_Secure($Server, $Reviewer, encrypted_commit), Fr(~bid)]
-  --[BidOnAbstract($Reviewer, abstract, abstract_r, ~bid),
+    [!Reviewer_Ready_For_Matching($Reviewer, ~key, ~reviewer_privk, pc_pubk),
+     In(encrypted_commit), Fr(~bid)]
+  --[BidOnAbstract($Reviewer, ~reviewer_privk, abstract, abstract_r, ~bid),
      OnlyOnceWith(<$Reviewer, abstract>)]->
-    [Out_Secure($Reviewer, $Server, encrypted_bid),
-     Reviewer_Bid_On_Abstract($Reviewer, ~key, ~reviewer_privk, $Server, server_pubk, pc_pubk, encrypted_bid)]
+    [Reviewer_Bid_On_Abstract($Reviewer, ~key, ~reviewer_privk, pc_pubk, encrypted_bid),
+     Out(encrypted_bid)]
 
-rule Matching_4_servers_receives_bids:
+rule Matching_3_pc_receives_bid:
   let
-    receipt = revealSign(bid, ~server_privk)
-  in
-    [!Server($Server, ~server_privk, $PC),
-     In_Secure($Reviewer, $Server, bid),
-     Server_Ready_For_Matching()]
-  --[]->
-    [Out_Secure($Server, $Reviewer, receipt),
-     Out_Secure($Server, $PC, bid),
-     Server_Ready_For_Matching()]
-
-rule Matching_5_reviewer_receives_receipt:
-  let
-    server_pubk = pk(~server_privk)
-  in
-    [Reviewer_Bid_On_Abstract($Reviewer, ~key, ~reviewer_privk, $Server, server_pubk, pc_pubk, encrypted_bid),
-     In_Secure($Server, $Submitter, receipt)]
-  --[Eq(revealVerify(receipt, encrypted_bid, server_pubk), true)]->
-    [Reviewer_Ready_To_Review($Reviewer, ~key, ~reviewer_privk, $Server, server_pubk, pc_pubk, encrypted_bid)]
-
-rule Matching_6_pc_receives_bid:
-  let
-    commit = senc(encrypted_commit, ~key)
+    commit = sdec(encrypted_commit, ~key)
     abstract = revealCommitM(commit)
     abstract_r = revealCommitR(commit)
     signed_bid = revealSign(<commit, ~bid>, ~reviewer_privk)
     encrypted_bid = senc(signed_bid, ~key)
     bid = getMessage(signed_bid)
     commit = fst(bid)
+    paper = revealCommitM(sndOfQuad(submitted_commits))
   in
-    [!PC($PC, ~pc_privk, $Server, server_pubk), 
-     In_Secure($Server, $PC, encrypted_bid),
+    [!PC($PC, ~pc_privk), 
+     In(encrypted_bid),
      !Received_Submission(submitted_commits, submitter_key),
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk))]
   --[CommitBid(signed_bid),
      Eq(commit, frthOfQuad(submitted_commits)),
-     Eq(revealVerify(signed_bid, bid, pk(~reviewer_privk)), true)]->
-    [Out(signed_bid)]
+     Eq(revealVerify(signed_bid, bid, pk(~reviewer_privk)), true)
+     OnlyOnceWith(<$Reviewer, paper>)]->
+    [Matching_Ready($Reviewer, paper),
+     Out(signed_bid)]
 
-rule Matching_7_bidding_closes:
-    [Server_Ready_For_Matching()]
-  --[]->
-    [Server_Ready_For_Reviewing()]
+rule Matching_4_pc_matches_paper:
+    [Matching_Ready($Reviewer, paper)]
+  --[MatchedPaper($Reviewer, paper)]->
+    [Paper_Matched($Reviewer, paper)]
+
+/*
+Phase 3: Reviewing
+1. PC sends a list of all abstracts
+3. Reviewers sends a list of bids
+5. PC publishes the matching and a list of anonymized Reviewers and their bids
+*/
 
 lemma sanity_one_submission:
 exists-trace
-"Ex p a rp1 rp2 ra1 ra2 R #i #j #k.
+"Ex p a rp1 rp2 ra1 ra2 R b r_privk #i #j #k #l.
     SubmittedPaper(p, a, <commit(p, rp1), commit(p, rp2), commit(a, ra1), commit(a, ra2)>) @i &
     CommitPaper(commit(p, rp1)) @j &
     CommitAbstract(commit(a, ra1)) @j &
-    ServerDidSendAbstractToReviewer(R) @k
-    // PCSendAbstract(R, a) @k
-     //BidOnAbstract(R, a, ra2, b) @k// &
-    // CommitBid(revealSign(<commit(a, ra2), b>, r_privk)) @l
+    BidOnAbstract(R, r_privk, a, ra2, b) @k &
+    CommitBid(revealSign(<commit(a, ra2), b>, r_privk)) @l
 "
 
 // lemma sanity_multiple_submissions:
@@ -269,10 +201,10 @@ restriction Eq:
     
 "
 
-restriction NotEq:
-" All x y #i. NotEq(x,y) @i ==> not(x = y)
+// restriction NotEq:
+// " All x y #i. NotEq(x,y) @i ==> not(x = y)
     
-"
+// "
 
 restriction OnlyOnceWith:
 " All x #i #j. OnlyOnceWith(x) @i & OnlyOnceWith(x) @j ==> #i=#j
