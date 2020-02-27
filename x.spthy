@@ -9,7 +9,14 @@ begin
  */
 
 builtins: symmetric-encryption, hashing, asymmetric-encryption, revealing-signing
-functions: commit/2
+functions: commit/2, revealCommit/1 [private], revealCommitR/1 [private], revealCommitM/1 [private], fstOfQuad/1, sndOfQuad/1, thrdOfQuad/1, frthOfQuad/1
+equations: revealCommit(commit(m, r)) = <m,r>,
+             revealCommitR(commit(m, r)) = r,
+             revealCommitM(commit(m, r)) = m,
+           fstOfQuad(<a,b,c,d>) = fst(<a,b,c,d>),
+           sndOfQuad(<a,b,c,d>) = fst(snd(<a,b,c,d>)),
+           thrdOfQuad(<a,b,c,d>) = fst(snd(snd(<a,b,c,d>))),
+           frthOfQuad(<a,b,c,d>) = snd(snd(snd(<a,b,c,d>))) 
 
 /*
  * Setting up our own secure, authenticated and replay resistant channels.
@@ -27,15 +34,7 @@ rule Secure_channel_in:
       --[ NotEq($A, $B)]->
         [ In_Secure($A,$B,x) ]
 
-/*
-1. Submitter send paper and abstract to S
-2. S sends submitter a receipt
-3. S sends papers to PC
-4. PC publicly commits to submitted papers and whether or not they will go forward in the process
-*/
 
-
-// Initializes a single Receiver (only once), and allows unbound number of Sender and PO.
 rule Setup: 
     let 
     server_pubk = pk(~server_privk)
@@ -45,7 +44,8 @@ rule Setup:
   --[OnlyOnceWith('Setup')]->
     [Setup_Submitter($Server, server_pubk, pc_pubk), 
      Setup_PC($PC, ~pc_privk, $Server, server_pubk), 
-     Setup_Server($Server, ~server_privk, $PC)]
+     Setup_Server($Server, ~server_privk, $PC),
+     !Setup_Reviewer($Server, server_pubk, pc_pubk)]
 
 rule Setup_submitter:
     let
@@ -67,79 +67,201 @@ rule Setup_pc:
 rule Setup_server:
     [Setup_Server($Server, ~server_privk, $PC)]
   --[]->
-    [!Server($Server, ~server_privk, $PC)]
+    [!Server($Server, ~server_privk, $PC), Server_Ready_For_Submission()]
 
-rule Submission_1:
+rule Setup_reviewer:
+    [!Setup_Reviewer($Server, server_pubk, pc_pubk), Fr(~key), Fr(~reviewer_privk)]
+  --[]->
+    [!Reviewer_Ready_For_Matching($Reviewer, ~key, ~reviewer_privk, $Server, server_pubk, pc_pubk),
+     !PC_Reviewer_Association($Reviewer, ~key, pk(~reviewer_privk))]
+
+/*
+Phase 1: Submission
+1. Submitter send paper and abstract to S
+2. S sends submitter a receipt
+3. S sends papers to PC
+4. PC publicly commits to submitted papers and whether or not they will go forward in the process
+*/
+
+rule Submission_1_submitter_submits:
   let
     server_pubk = pk(~server_privk)
     pc_pubk = pk(~pc_privk)
-    submission = <senc(<<~paper, ~abstract>, ~commit_randomness>, ~key), aenc(~key, pc_pubk)>
+    commit1 = commit(~paper, ~r_paper1)
+    commit2 = commit(~paper, ~r_paper2)
+    commit3 = commit(~abstract, ~r_abstract1)
+    commit4 = commit(~abstract, ~r_abstract2)
+    commits = <commit1, commit2, commit3, commit4>
+    submission = <senc(commits, ~key), aenc(~key, pc_pubk)>
   in
     [!Submitter_Ready_To_Submit($Submitter, $Server, server_pubk, pc_pubk),
-     Fr(~paper), Fr(~abstract), Fr(~key), Fr(~commit_randomness)]
-  --[SubmittedPaper(~paper, ~abstract, ~commit_randomness)]->
+     Fr(~paper), Fr(~abstract), Fr(~key), Fr(~r_abstract1), Fr(~r_abstract2), Fr(~r_paper1), Fr(~r_paper2)]
+  --[SubmittedPaper(~paper, ~abstract, commits)]->
     [Out_Secure($Submitter, $Server, submission),
-     Submitter_Did_Submit($Submitter, ~paper, ~abstract, ~key, ~commit_randomness, $Server, server_pubk, pc_pubk)]
+     Submitter_Did_Submit($Submitter, ~key, commits, $Server, server_pubk, pc_pubk)]
 
-rule Submission_2:
+rule Submission_2_server_receives_submissions:
   let
     receipt = revealSign(submission, ~server_privk)
   in
-    [!Server($Server, ~server_privk, $PC), In_Secure($Submitter, $Server, submission)]
+    [!Server($Server, ~server_privk, $PC),
+     In_Secure($Submitter, $Server, submission),
+     Server_Ready_For_Submission()]
   --[]->
-    [Out_Secure($Server, $Submitter, receipt), Out_Secure($Server, $PC, submission)]
+    [Out_Secure($Server, $Submitter, receipt),
+     Out_Secure($Server, $PC, submission),
+     Server_Ready_For_Submission()]
 
-rule Submission_3:
+rule Submission_3_submitter_receives_receipt:
   let
     server_pubk = pk(~server_privk)
     pc_pubk = pk(~pc_privk)
-    submission = <senc(<<~paper, ~abstract>, ~commit_randomness>, ~key), aenc(~key, pc_pubk)>
+    submission = <senc(commits, ~key), aenc(~key, pc_pubk)>
   in
-    [Submitter_Did_Submit($Submitter, ~paper, ~abstract, ~key, ~commit_randomness, $Server, server_pubk, pc_pubk),
+    [Submitter_Did_Submit($Submitter, ~key, commits, $Server, server_pubk, pc_pubk),
      In_Secure($Server, $Submitter, receipt)]
-  --[Eq(revealVerify(receipt, submission, pc_pubk), true)]->
-    [Submitter_Ready_For_Response($Submitter, ~paper, ~abstract, ~key, ~commit_randomness, $Server, server_pubk, pc_pubk)]
+  --[Eq(revealVerify(receipt, submission, server_pubk), true)]->
+    [Submitter_Ready_For_Response($Submitter, ~key, commits, $Server, server_pubk, pc_pubk)]
 
-rule Submission_4:
+rule Submission_4_pc_receives_submission:
   let
+    commit1 = commit(~paper, ~r_paper1)
+    commit2 = commit(~paper, ~r_paper2)
+    commit3 = commit(~abstract, ~r_abstract1)
+    commit4 = commit(~abstract, ~r_abstract2)
+    commits = <commit1, commit2, commit3, commit4>
+    submission = <senc(commits, ~key), aenc(~key, pc_pubk)>
     key = adec(snd(submission), ~pc_privk)
-    decrypted_submission = sdec(fst(submission), key)
-    paper =  fst(fst(decrypted_submission))
-    abstract = snd(fst(decrypted_submission))
-    commit_randomness = snd(decrypted_submission)
-    commit_paper = commit(paper, commit_randomness)
-    commit_abstract = commit(abstract, commit_randomness)
+    submitted_commits = sdec(fst(submission), ~key)
+    commit_paper = fstOfQuad(submitted_commits)
+    commit_abstract = thrdOfQuad(submitted_commits)
   in
     [!PC($PC, ~pc_privk, $Server, server_pubk), In_Secure($Server, $PC, submission)]
   --[CommitPaper(commit_paper), 
      CommitAbstract(commit_abstract)]->
-    [Received_Submission(paper, abstract, key, commit_randomness), 
+    [!Received_Submission(submitted_commits, ~key), 
      Out(<commit_paper, commit_abstract>)]
+
+rule Submission_5_submission_closes:
+    [Server_Ready_For_Submission()]
+  --[]->
+    [Server_Ready_For_Matching()]
+
+/*
+Phase 2: Matching
+1. PC sends a list of all abstracts to S
+2. S sends the list to all Reviewers
+3. Reviewers sends a list of bids to S
+4. S sends the list of bids to PC
+5. PC publishes the matching and a list of anonymized Reviewers and their bids
+*/
+
+rule Matching_1_pc_sends_abstracts:
+  let
+    encrypted_commit = senc(frthOfQuad(submitted_commits), ~reviewer_key) 
+  in
+    [!PC_Reviewer_Association($Reviewer, ~reviewer_key, reviewer_pubk), 
+     !Received_Submission(submitted_commits, submitter_key),
+     !PC($PC, ~pc_privk, $Server, server_pubk)]
+  --[OnlyOnceWith(<encrypted_commit, $Reviewer>), PCSendAbstract($Reviewer, revealCommitM(frthOfQuad(submitted_commits)))]->
+    [Out_Secure($PC, $Server, <encrypted_commit, $Reviewer>)]
+
+rule Matching_2_s_forwards_abstracts:
+    [Server_Ready_For_Matching(), 
+     !Server($Server, ~server_privk, $PC),
+     In_Secure($PC, $Server, <encrypted_commit, $Reviewer>)]
+  --[ServerDidSendAbstractToReviewer($Reviewer)]->
+    [Server_Ready_For_Matching(),
+     Out_Secure($Server, $Reviewer, encrypted_commit)]
+
+rule Matching_3_reviewer_sends_bids_to_server:
+  let
+    commit = senc(encrypted_commit, ~key)
+    abstract = revealCommitM(commit)
+    abstract_r = revealCommitR(commit)
+    signed_bid = revealSign(<commit, ~bid>, ~reviewer_privk)
+    encrypted_bid = senc(signed_bid, ~key)
+  in
+    [!Reviewer_Ready_For_Matching($Reviewer, ~key, ~reviewer_privk, $Server, server_pubk, pc_pubk),
+     In_Secure($Server, $Reviewer, encrypted_commit), Fr(~bid)]
+  --[BidOnAbstract($Reviewer, abstract, abstract_r, ~bid),
+     OnlyOnceWith(<$Reviewer, abstract>)]->
+    [Out_Secure($Reviewer, $Server, encrypted_bid),
+     Reviewer_Bid_On_Abstract($Reviewer, ~key, ~reviewer_privk, $Server, server_pubk, pc_pubk, encrypted_bid)]
+
+rule Matching_4_servers_receives_bids:
+  let
+    receipt = revealSign(bid, ~server_privk)
+  in
+    [!Server($Server, ~server_privk, $PC),
+     In_Secure($Reviewer, $Server, bid),
+     Server_Ready_For_Matching()]
+  --[]->
+    [Out_Secure($Server, $Reviewer, receipt),
+     Out_Secure($Server, $PC, bid),
+     Server_Ready_For_Matching()]
+
+rule Matching_5_reviewer_receives_receipt:
+  let
+    server_pubk = pk(~server_privk)
+  in
+    [Reviewer_Bid_On_Abstract($Reviewer, ~key, ~reviewer_privk, $Server, server_pubk, pc_pubk, encrypted_bid),
+     In_Secure($Server, $Submitter, receipt)]
+  --[Eq(revealVerify(receipt, encrypted_bid, server_pubk), true)]->
+    [Reviewer_Ready_To_Review($Reviewer, ~key, ~reviewer_privk, $Server, server_pubk, pc_pubk, encrypted_bid)]
+
+rule Matching_6_pc_receives_bid:
+  let
+    commit = senc(encrypted_commit, ~key)
+    abstract = revealCommitM(commit)
+    abstract_r = revealCommitR(commit)
+    signed_bid = revealSign(<commit, ~bid>, ~reviewer_privk)
+    encrypted_bid = senc(signed_bid, ~key)
+    bid = getMessage(signed_bid)
+    commit = fst(bid)
+  in
+    [!PC($PC, ~pc_privk, $Server, server_pubk), 
+     In_Secure($Server, $PC, encrypted_bid),
+     !Received_Submission(submitted_commits, submitter_key),
+     !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk))]
+  --[CommitBid(signed_bid),
+     Eq(commit, frthOfQuad(submitted_commits)),
+     Eq(revealVerify(signed_bid, bid, pk(~reviewer_privk)), true)]->
+    [Out(signed_bid)]
+
+rule Matching_7_bidding_closes:
+    [Server_Ready_For_Matching()]
+  --[]->
+    [Server_Ready_For_Reviewing()]
 
 lemma sanity_one_submission:
 exists-trace
-"Ex p a r #i #j.
-    SubmittedPaper(p, a, r) @i &
-    CommitPaper(commit(p, r)) @j &
-    CommitAbstract(commit(a, r)) @j &
-    i < j
+"Ex p a rp1 rp2 ra1 ra2 R #i #j #k.
+    SubmittedPaper(p, a, <commit(p, rp1), commit(p, rp2), commit(a, ra1), commit(a, ra2)>) @i &
+    CommitPaper(commit(p, rp1)) @j &
+    CommitAbstract(commit(a, ra1)) @j &
+    ServerDidSendAbstractToReviewer(R) @k
+    // PCSendAbstract(R, a) @k
+     //BidOnAbstract(R, a, ra2, b) @k// &
+    // CommitBid(revealSign(<commit(a, ra2), b>, r_privk)) @l
 "
 
-lemma sanity_multiple_submissions:
-exists-trace
-"Ex p1 a1 p2 a2 r1 r2 #i #j #k #l.
-    SubmittedPaper(p1, a1, r1) @i &
-    CommitPaper(commit(p1, r1)) @k &
-    CommitAbstract(commit(a1, r1)) @k &
-    SubmittedPaper(p2, a2, r2) @j &
-    CommitPaper(commit(p2, r2)) @l &
-    CommitAbstract(commit(a2, r2)) @l &
-    not(p1 = p2) &
-    not(a1 = a2) &
-    not(r1 = r2) &
-    i < k &
-    j < l
-"
+// lemma sanity_multiple_submissions:
+// exists-trace
+// "Ex p1 a1 p2 a2 r1 r2 #i #j #k #l.
+//     SubmittedPaper(p1, a1, r1) @i &
+//     CommitPaper(commit(p1, r1)) @k &
+//     CommitAbstract(commit(a1, r1)) @k &
+//     SubmittedPaper(p2, a2, r2) @j &
+//     CommitPaper(commit(p2, r2)) @l &
+//     CommitAbstract(commit(a2, r2)) @l &
+//     not(p1 = p2) &
+//     not(a1 = a2) &
+//     not(r1 = r2) &
+//     i < k &
+//     j < l
+// "
+
 
 //Restrictions
 restriction Eq:
