@@ -1,3 +1,5 @@
+{"COMMITS": "paper_submission_commit = commit(~paper, ~r_paper1) \npaper_review_commit = commit(~paper, ~r_paper2) \n abstract_submission_commit = commit(abstractFromPaper(~paper), ~r_abstract1) \n abstract_review_commit = commit(abstractFromPaper(~paper), ~r_abstract2) \n commits = <paper_submission_commit, paper_review_commit, abstract_submission_commit, abstract_review_commit>"}
+^
 theory x
 begin
 
@@ -10,7 +12,7 @@ begin
 
 builtins: symmetric-encryption, hashing, asymmetric-encryption, revealing-signing
 functions: commit/2, revealCommit/1 [private], revealCommitR/1 [private], revealCommitM/1 [private], 
-           fstOfQuad/1, sndOfQuad/1, thrdOfQuad/1, frthOfQuad/1, abstractFromPaper/1
+           fstOfQuad/1, sndOfQuad/1, thrdOfQuad/1, frthOfQuad/1, abstractFromPaper/1, makeDiscussion/1, makeGrade/1
 equations: revealCommit(commit(m, r)) = <m,r>,
            revealCommitR(commit(m, r)) = r,
            revealCommitM(commit(m, r)) = m,
@@ -75,11 +77,11 @@ rule Submission_1_submitter_submits:
   let
     abstract = abstractFromPaper(~paper)
     pc_pubk = pk(~pc_privk)
-    commit1 = commit(~paper, ~r_paper1)
-    commit2 = commit(~paper, ~r_paper2)
-    commit3 = commit(abstract, ~r_abstract1)
-    commit4 = commit(abstract, ~r_abstract2)
-    commits = <commit1, commit2, commit3, commit4>
+        paper_submission_commit = commit(~paper, ~r_paper1) 
+paper_review_commit = commit(~paper, ~r_paper2) 
+ abstract_submission_commit = commit(abstractFromPaper(~paper), ~r_abstract1) 
+ abstract_review_commit = commit(abstractFromPaper(~paper), ~r_abstract2) 
+ commits = <paper_submission_commit, paper_review_commit, abstract_submission_commit, abstract_review_commit>
     submission = <senc(commits, ~key), aenc(~key, pc_pubk)>
   in
     [!Submitter_Ready_To_Submit($Submitter, pc_pubk),
@@ -90,11 +92,7 @@ rule Submission_1_submitter_submits:
 
 rule Submission_2_pc_receives_submission:
   let
-    paper_submission_commit = commit(~paper, ~r_paper1)
-    paper_review_commit = commit(~paper, ~r_paper2)
-    abstract_submission_commit = commit(abstractFromPaper(~paper), ~r_abstract1)
-    abstract_review_commit = commit(abstractFromPaper(~paper), ~r_abstract2)
-    commits = <paper_submission_commit, paper_review_commit, abstract_submission_commit, abstract_review_commit>
+    COMMITS
     submission = <senc(commits, ~key), aenc(~key, pc_pubk)> 
     submitter_key = adec(snd(submission), ~pc_privk)
     submitted_commits = sdec(fst(submission), submitter_key)
@@ -129,8 +127,6 @@ rule Matching_2_reviewer_sends_bids:
     abstract = abstractFromPaper(~paper)
     commit = commit(abstract, ~abstract_r)
     encrypted_commit = senc(commit, ~key)   
-
-
     signed_bid = revealSign(<commit, ~bid>, ~reviewer_privk)
     encrypted_bid = senc(signed_bid, ~key)
   in
@@ -144,6 +140,11 @@ rule Matching_2_reviewer_sends_bids:
 
 rule Matching_3_pc_receives_bid:
   let
+        paper_submission_commit = commit(~paper, ~r_paper1) 
+paper_review_commit = commit(~paper, ~r_paper2) 
+ abstract_submission_commit = commit(abstractFromPaper(~paper), ~r_abstract1) 
+ abstract_review_commit = commit(abstractFromPaper(~paper), ~r_abstract2) 
+ commits = <paper_submission_commit, paper_review_commit, abstract_submission_commit, abstract_review_commit>
     abstract_review_commit = commit(abstractFromPaper(~paper), ~r_abstract2)
     signed_bid = revealSign(<abstract_review_commit, ~bid>, ~reviewer_privk)
     encrypted_bid = senc(signed_bid, ~reviewer_key)
@@ -157,13 +158,13 @@ rule Matching_3_pc_receives_bid:
      ,Eq(revealVerify(signed_bid, <abstract_review_commit, ~bid>, pk(~reviewer_privk)), true)
      ,OnlyOnceWith(<$Reviewer, ~paper>)
      ]->
-    [Matching_Ready($Reviewer, ~paper),
+    [Matching_Ready($Reviewer, pk(~reviewer_privk), ~paper),
      TestOut(<'log',signed_bid>)]
 
 rule Matching_4_pc_matches_paper:
-    [Matching_Ready($Reviewer, paper)]
+    [Matching_Ready($Reviewer, pk(~reviewer_privk), paper)]
   --[MatchedPaper($Reviewer, paper)]->
-    [Paper_Matched($Reviewer, paper)]
+    [!Paper_Matched($Reviewer, pk(~reviewer_privk), paper)]
 
 /*
 Phase 3: Reviewing
@@ -179,12 +180,12 @@ rule Reviewing_1_pc_sends_paper:
   in
     [!PC_Reviewer_Association($Reviewer, ~reviewer_key, reviewer_pubk), 
      !Received_Submission(submitted_commits, submitter_key),
-     Paper_Matched($Reviewer, paper),
+     !Paper_Matched($Reviewer, pk(~reviewer_privk), paper),
      !PC($PC, ~pc_privk)]
-  --[]->
+  --[OnlyOnceWith(<$Reviewer, paper, 'reviewing'>)]->
     [TestOut(encrypted_commit), Waiting_For_Review($Reviewer, paper)]
 
-rule Matching_2_reviewer_sends_review:
+rule Reviewing_2_reviewer_sends_review:
   let
     commit = sdec(encrypted_commit, ~key)    
     paper = revealCommitM(commit)
@@ -199,36 +200,103 @@ rule Matching_2_reviewer_sends_review:
      TestIn(encrypted_commit),
      Fr(~review_text),
      Fr(~review_score)]
-  --[Eq(abstractFromPaper(paper), bidded_abstract)]->
-    [TestOut(encrypted_review)]
+  --[Eq(abstractFromPaper(paper), bidded_abstract),
+     ReviewedPaper($Reviewer, paper)]->
+    [TestOut(encrypted_review),
+     Reviewer_Reviewed_Paper($Reviewer, ~key, ~reviewer_privk, pc_pubk, ~review_score, ~review_text, paper, paper_r)]
 
-rule Matching_3_pc_receives_review:
+rule Reviewing_3_pc_receives_review:
   let
+  	    paper_submission_commit = commit(~paper, ~r_paper1) 
+paper_review_commit = commit(~paper, ~r_paper2) 
+ abstract_submission_commit = commit(abstractFromPaper(~paper), ~r_abstract1) 
+ abstract_review_commit = commit(abstractFromPaper(~paper), ~r_abstract2) 
+ commits = <paper_submission_commit, paper_review_commit, abstract_submission_commit, abstract_review_commit>
     signed_commit_and_review = sdec(encrypted_commit_and_review, ~reviewer_key)
     signed_commit = fst(signed_commit_and_review)
-    commit = getMessage(signed_commit)
-    paper = revealCommitM(commit)
     signed_review = snd(signed_commit_and_review)
   in
     [!PC($PC, ~pc_privk), 
      !Received_Submission(submitted_commits, submitter_key),
-     Waiting_For_Review($Reviewer, paper),
+     Waiting_For_Review($Reviewer, ~paper),
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      TestIn(encrypted_commit_and_review)]
-  --[Eq(revealVerify(signed_commit, commit, pk(~reviewer_privk)), true),
-     Eq(revealVerify(signed_review, getMessage(signed_review), pk(~reviewer_privk)), true)]->
-    [Received_Review(signed_review),
+  --[Eq(revealVerify(signed_commit, paper_review_commit, pk(~reviewer_privk)), true),
+     Eq(revealVerify(signed_review, getMessage(signed_review), pk(~reviewer_privk)), true),
+     ReceivedReview($Reviewer, ~paper)]->
+    [Received_Review($Reviewer, ~paper, signed_review),
      TestOut(<'log', signed_commit>)]
+
+/*
+Phase 4: Discussion
+1. PC sends reviews and the group key to reviewer
+2. Reviewer discuss and settle on a grade/recommendation and sends to PC
+3. PC outs the signed commit to the paper (grade)
+*/
+
+rule Discussion_1_pc_sends_review:
+  let
+    encrypted_review_and_key_1 = senc(<signed_review2, ~group_key>, ~reviewer_key1)
+    encrypted_review_and_key_2 = senc(<signed_review1, ~group_key>, ~reviewer_key2)
+  in
+    [!PC_Reviewer_Association($Reviewer1, ~reviewer_key1, reviewer_pubk1),
+     !PC_Reviewer_Association($Reviewer2, ~reviewer_key2, reviewer_pubk2), 
+     Received_Review($Reviewer1, ~paper, signed_review1),
+     Received_Review($Reviewer2, ~paper, signed_review2),
+     !Received_Submission(submitted_commits, submitter_key),
+     !PC($PC, ~pc_privk), Fr(~group_key)]
+  --[NotEq($Reviewer1, $Reviewer2)]->
+    [TestOut(encrypted_review_and_key_1), TestOut(encrypted_review_and_key_2),
+     PC_Waiting_For_Discussion(~paper, $Reviewer1, $Reviewer2, ~group_key)]
+
+rule Discussion_2_reviewers_discuss:
+  let
+  	signed_review2 = revealSign(<~review_score2, ~review_text2>, ~reviewer2_privk)
+    encrypted_review_and_key = senc(<signed_review2, ~group_key>, ~key)
+    discussion = makeDiscussion(~paper)
+    grade = makeGrade(~paper)
+    signed_discussion = revealSign(discussion, reviewer_privk)
+    signed_grade = revealSign(grade, reviewer_privk)
+    signed_grade_commit = revealSign(commit(grade, ~paper_r), ~reviewer_privk)
+    encrypted_discussion_and_grade = senc(<signed_discussion, signed_grade, signed_grade_commit>, ~group_key)
+  in
+    [Reviewer_Reviewed_Paper($Reviewer, ~key, ~reviewer_privk, pc_pubk, ~review_score, ~review_text, ~paper, ~paper_r),
+     !Paper_Matched($Reviewer2, pk(~reviewer2_privk), ~paper),
+     TestIn(encrypted_review_and_key)]
+  --[NotEq($Reviewer1, $Reviewer2)]->
+    [TestOut(encrypted_discussion_and_grade)]
+
+rule Discussion_3_PC_recieves_discussion:
+  let
+    signed_discussion1 = revealSign(makeDiscussion(~paper), reviewer_privk1)
+    signed_grade1 = revealSign(makeGrade(~paper), reviewer_privk1)
+    signed_grade_commit1 = revealSign(commit(makeGrade(~paper), ~paper_r), ~reviewer_privk1)
+    encrypted_discussion_and_grade1 = senc(<signed_discussion1, signed_grade1, signed_grade_commit1>, ~group_key)
+
+    signed_discussion2 = revealSign(makeDiscussion(~paper), reviewer_privk2)
+    signed_grade2 = revealSign(makeGrade(~paper), reviewer_privk2)
+    signed_grade_commit2 = revealSign(commit(makeGrade(~paper), ~paper_r), ~reviewer_privk2)
+    encrypted_discussion_and_grade2 = senc(<signed_discussion2, signed_grade2, signed_grade_commit2>, ~group_key)
+  in
+    [PC_Waiting_For_Discussion(~paper, $Reviewer1, $Reviewer2, ~group_key),
+     !PC_Reviewer_Association($Reviewer1, ~reviewer_key1, pk(reviewer_privk1)),
+     !PC_Reviewer_Association($Reviewer2, ~reviewer_key2, pk(reviewer_privk2)), 
+     TestIn(encrypted_discussion_and_grade1),
+     TestIn(encrypted_discussion_and_grade2)]
+  --[NotEq($Reviewer1, $Reviewer2)]->
+    [TestOut(encrypted_discussion_and_grade)]
 
 
 lemma sanity_one_submission:
 exists-trace
-"Ex p rp1 rp2 ra1 ra2 R r_privk b #i #j #k #l.
+"Ex p rp1 rp2 ra1 ra2 R r_privk b #i #j #k #l #m #n.
     SubmittedPaper(p, abstractFromPaper(p), <commit(p, rp1), commit(p, rp2), commit(abstractFromPaper(p), ra1), commit(abstractFromPaper(p), ra2)>) @i
     & CommitPaper(commit(p, rp1)) @j
     & CommitAbstract(commit(abstractFromPaper(p), ra1)) @j
     & BidOnAbstract(R, r_privk, abstractFromPaper(p), ra2, b) @k
     & CommitBid(revealSign(<commit(abstractFromPaper(p), ra2), b>, r_privk)) @l
+    & ReviewedPaper(R, p) @m
+    & ReceivedReview(R, p) @n
 "
 
 // lemma sanity_multiple_submissions:
