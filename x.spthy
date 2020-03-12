@@ -176,7 +176,7 @@ rule Reviewing_1_reviewer_sends_review:
      TestIn(matching), TestIn(matching_secret)]
   --[ReviewedPaper($Reviewer, ~paper, ~group_key)]->
     [Reviewer_Reviewed_Paper($Reviewer, ~paper, ~r_paper, ~r_score),
-     TestOut(group_message), TestOut(group_message), TestOut(commit_pair)]
+     TestOut(group_message), TestOut(group_message), TestOut(group_message), TestOut(commit_pair)]
 
 /*
 Phase 4: Discussion
@@ -257,10 +257,10 @@ rule Discussion_3_pc_paper_rejected:
   in
     [TestIn(group_message1), TestIn(group_message2), TestIn(group_message3),
      Ready_For_Decision(~paper, ~r_paper, ~r_score, ~reviewer_privk1, ~reviewer_privk2, ~reviewer_privk3)]
-  --[PaperRejected(~paper)]->
+  --[PaperRejected(~paper, $Reviewer1, $Reviewer2, $Reviewer3, ~group_key)]->
     [TestOut(rejected_out)]
 
-lemma sanity_one_paper_accepted:
+lemma sanity_one:
 exists-trace
 "Ex R p r R2 R3 R_key R_privk b g_k #h #i #j #k #l #m #n #o #p #q #r.
     ReviewerSetup(R, R_key, R_privk) @h
@@ -276,6 +276,12 @@ exists-trace
     & PaperAccepted(p) @r
 "
 
+lemma sanity_only_paper_accepted:
+exists-trace
+"Ex p #r. 
+   PaperAccepted(p) @r
+"
+/*
 lemma sanity_one_paper_rejected:
 exists-trace
 "Ex R p r R2 R3 R_key R_privk b g_k #h #i #j #k #l #m #n #o #p #q #r.
@@ -291,6 +297,7 @@ exists-trace
     & PCReceivedDiscussionFromReviewer(R, p, g_k) @q
     & PaperRejected(p) @r
 "
+*/
 
 // lemma sanity_multiple_submissions:
 // exists-trace
