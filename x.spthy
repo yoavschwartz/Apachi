@@ -15,6 +15,11 @@ functions: commit/2, makeDiscussion/1, makeGrade/1
 rule TestOut:
     [TestOut(m)]
   --[]->
+    [!Test(m)]
+
+rule TestIn:
+    [!Test(m)]
+  --[]->
     [TestIn(m)]
 
 /*
@@ -176,7 +181,7 @@ rule Reviewing_1_reviewer_sends_review:
      TestIn(matching), TestIn(matching_secret)]
   --[ReviewedPaper($Reviewer, ~paper, ~group_key)]->
     [Reviewer_Reviewed_Paper($Reviewer, ~paper, ~r_paper, ~r_score),
-     TestOut(group_message), TestOut(group_message), TestOut(group_message), TestOut(commit_pair)]
+     TestOut(group_message), TestOut(commit_pair)]
 
 /*
 Phase 4: Discussion
@@ -234,7 +239,7 @@ rule Discussion_2_pc_receives_discussion_and_grade:
      NotEq(~reviewer_privk1, ~reviewer_privk2),
      NotEq(~reviewer_privk1, ~reviewer_privk3),
      NotEq(~reviewer_privk2, ~reviewer_privk3)]->
-    [Ready_For_Decision(~paper, ~r_paper, ~r_score, ~reviewer_privk1, ~reviewer_privk2, ~reviewer_privk3), 
+    [Ready_For_Decision(~paper, ~r_paper, ~r_score, ~reviewer_privk1, ~reviewer_privk2, ~reviewer_privk3, ~group_key), 
      TestOut(senc(makeDiscussion(~paper), ~submitter_key))]
 
 rule Discussion_3_pc_paper_accepted:
@@ -242,7 +247,7 @@ rule Discussion_3_pc_paper_accepted:
   	grade = makeGrade(~paper)
     accepted_out = <~paper, ~r_paper>
   in
-    [Ready_For_Decision(~paper, ~r_paper, ~r_score, ~reviewer_privk1, ~reviewer_privk2, ~reviewer_privk3)]
+    [Ready_For_Decision(~paper, ~r_paper, ~r_score, ~reviewer_privk1, ~reviewer_privk2, ~reviewer_privk3, ~group_key)]
   --[PaperAccepted(~paper)]->
     [TestOut(accepted_out), TestOut(grade)]
 
@@ -256,8 +261,8 @@ rule Discussion_3_pc_paper_rejected:
     rejected_out = <~r_score, grade, ~review_score1, ~review_score2, ~review_score3>
   in
     [TestIn(group_message1), TestIn(group_message2), TestIn(group_message3),
-     Ready_For_Decision(~paper, ~r_paper, ~r_score, ~reviewer_privk1, ~reviewer_privk2, ~reviewer_privk3)]
-  --[PaperRejected(~paper, $Reviewer1, $Reviewer2, $Reviewer3, ~group_key)]->
+     Ready_For_Decision(~paper, ~r_paper, ~r_score, ~reviewer_privk1, ~reviewer_privk2, ~reviewer_privk3, ~group_key)]
+  --[PaperRejected(~paper)]->
     [TestOut(rejected_out)]
 
 lemma sanity_one:
@@ -280,6 +285,12 @@ lemma sanity_only_paper_accepted:
 exists-trace
 "Ex p #r. 
    PaperAccepted(p) @r
+"
+
+lemma sanity_only_paper_rejected:
+exists-trace
+"Ex p #r. 
+   PaperRejected(p) @r
 "
 /*
 lemma sanity_one_paper_rejected:
