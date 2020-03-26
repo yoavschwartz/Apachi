@@ -2,8 +2,8 @@ theory untrusted_reviewers
 begin
 
 /*
- *  Author: 
- *  Model Name: x.spthy
+ *  Author: Yoav.s&Nicolai.s
+ *  Model Name: untrusted_reviewers.spthy
  *  Status: DEVELOPMENTAL
  *
  */
@@ -46,7 +46,7 @@ rule Setup:
   --[OnlyOnceWith('Setup'), KeySecret(~pc_privk)]->
     [Setup_Submitter(pc_pubk), 
      Setup_PC($PC, ~pc_privk), 
-     Setup_Reviewer(pc_pubk), Setup_Reviewer(pc_pubk), Setup_Reviewer(pc_pubk)]
+     !Setup_Reviewer(pc_pubk)]
 
 rule Setup_submitter:
     let
@@ -68,7 +68,7 @@ rule Setup_reviewer:
     let
     pc_pubk = pk(~pc_privk)
     in
-    [Setup_Reviewer(pc_pubk), Fr(~key), Fr(~reviewer_privk)]
+    [!Setup_Reviewer(pc_pubk), Fr(~key), Fr(~reviewer_privk)]
   --[ReviewerSetup($Reviewer, ~key, ~reviewer_privk),
      OnlyOnceWith(<'setup_reviewer', $Reviewer>),
      KeySecret(~key),
@@ -273,7 +273,7 @@ rule Discussion_2_pc_receives_discussion_and_grade:
      NotEq(~reviewer_privk2, ~reviewer_privk3),
      SubmitterKeyUsed(~submitter_key)]->
     [Ready_For_Decision(paper(~paper), grade, randomness(~r_submit), randomness(~r_review), randomness(~r_grade), ~reviewer_privk1, ~reviewer_privk2, ~reviewer_privk3, ~group_key)
-     ,TestOut(sumbitter_response)
+     //,TestOut(sumbitter_response)
      ]
 
 rule Discussion_3_pc_paper_accepted:
@@ -341,10 +341,6 @@ all-traces
 "All r #i. RandomSecret(r) @i ==> not(Ex #j. KU(r) @j) | (Ex #j. RandomReveal(r) @j) 
 "
 */
-
-lemma authentic_submitter [reuse, use_induction]:
-"All k #i. SubmitterKeyUsed(k)@i ==> Ex #j. SubmitterKeyCreated(k) @j & j < i
-"
 
 lemma paper_secrecy [reuse]:
 "All p r #i #j.
