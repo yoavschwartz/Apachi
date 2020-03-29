@@ -10,6 +10,7 @@ begin
 
 builtins: symmetric-encryption, hashing, asymmetric-encryption, revealing-signing
 functions: commit/2, makeDiscussion/1, makeGrade/1, makeReview/2 [private], paper/1, randomness/1
+heuristic: i
 
 
 rule TestOut:
@@ -24,13 +25,14 @@ rule TestIn:
 
 rule PublicTestIn:
     [In(m)]
-  --[]->
+  --[AdversaryIn()]->
     [TestIn(m)]
 
 rule PublicTestOut:
     [!Test(m)]
-  --[]->
+  --[AdversaryOut()]->
     [Out(m)]
+
 
 /*
  * Setting up our own secure, authenticated and replay resistant channels.
@@ -52,29 +54,41 @@ rule Setup_submitter:
     let
     pc_pubk = pk(~pc_privk)
     in
-    [Setup_Submitter(pc_pubk), Fr(~key), Fr(~S_privk)]
-  --[OnlyOnceWith(<'setup_submitter', $Submitter>),
-     KeySecret(~key),
+    [Setup_Submitter(pc_pubk), Fr(~submitter_key), Fr(~S_privk)]
+  --[OnlyOnceWith(<'Setup_Submitter', $Submitter>),
+     KeySecret(~submitter_key),
      KeySecret(~S_privk),
-     SubmitterKeyCreated(~key)]->
-    [!Submitter_Ready_To_Submit($Submitter, pc_pubk, ~key, ~S_privk)]
+     SubmitterKeyCreated(~submitter_key)]->
+    [!Submitter_Ready_To_Submit($Submitter, pc_pubk, ~submitter_key, ~S_privk)]
 
 rule Setup_pc:
     [Setup_PC($PC, ~pc_privk)]
-  --[OnlyOnceWith('setup_pc')]->
+  --[OnlyOnceWith('Setup_PC')]->
     [!PC($PC, ~pc_privk), Out(pk(~pc_privk))]
 
 rule Setup_reviewer:
     let
     pc_pubk = pk(~pc_privk)
     in
-    [!Setup_Reviewer(pc_pubk), Fr(~key), Fr(~reviewer_privk)]
-  --[ReviewerSetup($Reviewer, ~key, ~reviewer_privk),
-     OnlyOnceWith(<'setup_reviewer', $Reviewer>),
-     KeySecret(~key),
+    [!Setup_Reviewer(pc_pubk), Fr(~reviewer_key), Fr(~reviewer_privk)]
+  --[ReviewerSetup($Reviewer, ~reviewer_key, ~reviewer_privk),
+     OnlyOnceWith(<'Setup_Reviewer', $Reviewer>),
+     KeySecret(~reviewer_key),
      KeySecret(~reviewer_privk)]->
-    [!PC_Reviewer_Association($Reviewer, ~key, pk(~reviewer_privk)),
-     !Reviewer($Reviewer, ~key, ~reviewer_privk, pc_pubk)]
+    [!PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
+     !Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pc_pubk)]
+
+/*
+rule Make_submission:
+  let
+    paper_commit = commit(paper(~paper), randomness(~r_submit)) 
+    submission = <senc(<paper(~paper), randomness(~r_submit), randomness(~r_review)>, ~submitter_key), aenc(~submitter_key, pk(~pc_privk)), paper_commit>
+    signed_submission = revealSign(submission, ~S_privk)
+  in
+    [Fr(~paper), Fr(~r_submit), Fr(~r_review), Fr(~S_privk), Fr(~submitter_key), !PC($PC, ~pc_privk)]
+  --[]->
+    [Out(signed_submission), Out(<~paper, ~r_submit, ~r_review, ~S_privk, ~submitter_key>)]
+*/
 
 /*
 Phase 1: Submission
@@ -86,32 +100,58 @@ Phase 1: Submission
 
 rule Submission_1_submitter_submits:
   let
-    paper_commit = commit(paper(~paper), randomness(~r_submit)) 
-    identity_commit = commit($Submitter, ~r_id)
-    submission = <senc(<paper(~paper), randomness(~r_submit), randomness(~r_review)>, ~key), aenc(~key, pc_pubk), paper_commit, identity_commit>
+    paper_commit = commit(paper(~paper), randomness(~r_submit))
+    signed_paper_commit = revealSign(paper_commit, ~S_privk)
+    submission = senc(<paper(~paper), randomness(~r_submit), randomness(~r_review)>, ~submitter_key)
     signed_submission = revealSign(submission, ~S_privk)
+    submission_key = aenc(~submitter_key, pk(~pc_privk))
+    signed_submission_key = revealSign(submission_key, ~S_privk)
   in
     [Fr(~paper), Fr(~r_submit), Fr(~r_review), Fr(~r_id),
-     !Submitter_Ready_To_Submit($Submitter, pc_pubk, ~key, ~S_privk)]
-  --[SubmittedPaper(paper_commit),
+     !Submitter_Ready_To_Submit($Submitter, pk(~pc_privk), ~submitter_key, ~S_privk)]
+  --[SubmittedPaperSecret(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, ~pc_privk),
+     SubmittedPaper(paper_commit),
      RandomSecret(~r_review),
      RandomSecret(~r_id),
-     RandomSecret(~r_submit)]->
-    [TestOut(signed_submission)]
+     RandomSecret(~r_submit),
+     PaperSecret(~paper),
+     PaperSecret(paper(~paper)),
+     PublicLog(signed_paper_commit),
+     PublicLog(signed_submission),
+     PublicLog(signed_submission_key)
+     ]->
+    [TestOut(signed_paper_commit),
+     TestOut(signed_submission),
+     TestOut(signed_submission_key)]
 
 rule Submission_2_pc_receives_submission:
   let
-  	paper_commit = commit(paper(~paper), randomness(~r_submit))
-    identity_commit = commit($Submitter, ~r_id)
-    submission = <senc(<paper(~paper), randomness(~r_submit), randomness(~r_review)>, ~submitter_key), aenc(~key, pc_pubk), paper_commit, identity_commit>
-    signed_submission = revealSign(submission, ~S_privk)
+    submission = senc(<paper(~paper), randomness(~r_submit), randomness(~r_review)>, ~submitter_key)
+    submission_key = aenc(~submitter_key, pk(~pc_privk))
+
+    paper_commit = commit(paper(~paper), randomness(~r_submit))
+    signed_paper_commit = revealSign(paper_commit, ~pc_privk)
   in
     [!PC($PC, ~pc_privk),
-     TestIn(signed_submission)]
+     TestIn(revealSign(submission, ~S_privk)),
+     TestIn(revealSign(submission_key, ~S_privk)),
+     TestIn(revealSign(paper_commit,~S_privk))]
   --[PCReceivedPaper(paper_commit),
-     OnlyOnceWith(<'submission', ~paper>)]->
+     OnlyOnceWith(<'Submission_1', ~paper>),
+     PublicLog(signed_paper_commit)]->
     [!Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key), 
-     TestOut(revealSign(paper_commit, ~pc_privk))]
+     TestOut(signed_paper_commit)]
+
+rule Submission_2_pc_receives_submission_misbehaving:
+  let
+    paper_commit = commit(paper(~paper), randomness(~r_submit))
+  in
+    [!PC($PC, ~pc_privk),
+     Fr(~paper), Fr(~r_submit), Fr(~r_review), Fr(~submitter_key)]
+  --[OnlyOnceWith(<'Submission_1', ~paper>),
+     MisbehavingPC(paper(~paper)),
+     MisbehavingActor(paper(~paper))]->
+    [!Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key)]
 
 
 /*
@@ -126,87 +166,88 @@ rule Matching_1_pc_sends_papers:
   let
     encrypted_paper = revealSign(senc(paper(~paper), ~reviewer_key), ~pc_privk)
   in
-    [!PC_Reviewer_Association($Reviewer, ~reviewer_key, reviewer_pubk), 
+    [!PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)), 
      !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key),
      !PC($PC, ~pc_privk)]
-  --[OnlyOnceWith(<'Matching_1', encrypted_paper, $Reviewer>),
-      PCSendsPaperToReviewer($Reviewer, encrypted_paper)]->
+  --[OnlyOnceWith(<'Matching_1', $Reviewer, ~paper>),
+     PCSendsPaperToReviewer($Reviewer, paper(~paper)),
+     PublicLog(encrypted_paper)]->
     [TestOut(encrypted_paper)]
 
 rule Matching_2_reviewer_sends_bids:
   let
   	encrypted_paper = revealSign(senc(paper(~paper), ~reviewer_key), ~pc_privk)
-  	encrypted_bid = senc(<paper(~paper), 'bid'>, ~reviewer_key)
+
+  	encrypted_bid = senc(<h(paper(~paper)), 'bid'>, ~reviewer_key)
     signed_encrypted_bid = revealSign(encrypted_bid, ~reviewer_privk)
   in
     [!Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pc_pubk),
      TestIn(encrypted_paper)]
   --[BidOnPaper($Reviewer, ~reviewer_key, paper(~paper)),
-     OnlyOnceWith(<'Matching_2', $Reviewer, paper(~paper)>)]->
+     OnlyOnceWith(<'Matching_2', $Reviewer, ~paper>),
+     PublicLog(signed_encrypted_bid)]->
     [Reviewer_Bid_On_Paper($Reviewer, paper(~paper)),
      TestOut(signed_encrypted_bid)]
 
 rule Matching_3_pc_receives_bid:
   let
-    encrypted_bid = senc(<paper(~paper), 'bid'>, ~reviewer_key)
+    encrypted_bid = senc(<h(paper(~paper)), 'bid'>, ~reviewer_key)
     signed_encrypted_bid = revealSign(encrypted_bid, ~reviewer_privk)
   in
     [!Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key),
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      TestIn(signed_encrypted_bid)]
-  --[PCReceivedBid($Reviewer, 'bid'),
-  	 OnlyOnceWith(<'Matching_3', $Reviewer, paper(~paper)>)]->
+  --[PCReceivedBid($Reviewer, 'bid', paper(~paper)),
+  	 OnlyOnceWith(<'Matching_3', $Reviewer, ~paper>)]->
     [Matching_Ready($Reviewer, pk(~reviewer_privk), paper(~paper))]
 
 rule Matching_4_pc_matches_paper:
   let
     review_paper_commit = commit(paper(~paper), randomness(~r_review))
-    matching1 = revealSign(<review_paper_commit, pk(~reviewer_privk1)>, ~pc_privk)
-    matching2 = revealSign(<review_paper_commit, pk(~reviewer_privk2)>, ~pc_privk)
-    matching3 = revealSign(<review_paper_commit, pk(~reviewer_privk3)>, ~pc_privk)
-    matching_secret1 = revealSign(senc(<paper(~paper), ~group_key, randomness(~r_grade), randomness(~r_review)>, ~reviewer_key1), ~pc_privk)
-    matching_secret2 = revealSign(senc(<paper(~paper), ~group_key, randomness(~r_grade), randomness(~r_review)>, ~reviewer_key2), ~pc_privk)
-    matching_secret3 = revealSign(senc(<paper(~paper), ~group_key, randomness(~r_grade), randomness(~r_review)>, ~reviewer_key3), ~pc_privk)
+    matching = revealSign(<review_paper_commit, pk(~reviewer_privk)>, ~pc_privk)
+    matching_secret = revealSign(senc(<h(paper(~paper)), ~group_key, randomness(~r_grade), randomness(~r_review)>, ~reviewer_key), ~pc_privk)
   in
     [Fr(~group_key), Fr(~r_grade), !PC($PC, ~pc_privk),
-     !PC_Reviewer_Association($Reviewer1, ~reviewer_key1, pk(~reviewer_privk1)),
-     !PC_Reviewer_Association($Reviewer2, ~reviewer_key2, pk(~reviewer_privk2)),
-     !PC_Reviewer_Association($Reviewer3, ~reviewer_key3, pk(~reviewer_privk3)),
+     !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key),
-     Matching_Ready($Reviewer1, pk(~reviewer_privk1), paper(~paper)),
-     Matching_Ready($Reviewer2, pk(~reviewer_privk2), paper(~paper)),
-     Matching_Ready($Reviewer3, pk(~reviewer_privk3), paper(~paper))]
-  --[MatchedPaper(paper(~paper), $Reviewer1, $Reviewer2, $Reviewer3, ~group_key),
-     OnlyOnceWith(<'matched_paper', paper(~paper)>),
+     Matching_Ready($Reviewer, pk(~reviewer_privk), paper(~paper))]
+  --[MatchedPaper(paper(~paper), $Reviewer, ~group_key),
+     OnlyOnceWith(<'Matching_4', $Reviewer, ~paper>),
      KeySecret(~group_key),
-     RandomSecret(~r_grade)]->
-    [PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer1, $Reviewer2, $Reviewer3, ~group_key),
-     TestOut(matching1), TestOut(matching2), TestOut(matching3),
-     TestOut(matching_secret1), TestOut(matching_secret2), TestOut(matching_secret3)]
+     RandomSecret(~r_grade),
+     PublicLog(matching),
+     PublicLog(matching_secret)]->
+    [PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key),
+     TestOut(matching),
+     TestOut(matching_secret)]
 
 /*
 Phase 3: Reviewing
 1. Reviewer sends review text and score signs the review text and score and sings a commit to the paper
 */
 
-
 rule Reviewing_1_reviewer_sends_review:
   let
     review_paper_commit = commit(paper(~paper), randomness(~r_review))
   	matching = revealSign(<review_paper_commit, pk(~reviewer_privk)>, ~pc_privk)
-  	matching_secret = revealSign(senc(<paper(~paper), ~group_key, randomness(~r_grade), randomness(~r_review)>, ~reviewer_key), ~pc_privk)
+  	matching_secret = revealSign(senc(<h(paper(~paper)), ~group_key, randomness(~r_grade), randomness(~r_review)>, ~reviewer_key), ~pc_privk)
 
     review = makeReview(paper(~paper), $Reviewer)
   	group_message = senc(revealSign(<review>, ~reviewer_privk), ~group_key)
   	commit_paper_reviewed = revealSign(<review_paper_commit, 'reviewed'>, ~reviewer_privk)
   in
     [Reviewer_Bid_On_Paper($Reviewer, paper(~paper)),
-     !Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pc_pubk),
-     TestIn(matching), TestIn(matching_secret)]
+     !Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pk(~pc_privk)),
+     TestIn(matching),
+     TestIn(matching_secret)]
   --[ReviewedPaper($Reviewer, paper(~paper), ~group_key),
-     SecretReview(review)]->
-    [Reviewer_Reviewed_Paper($Reviewer, paper(~paper), randomness(~r_review), randomness(~r_grade)),
-     TestOut(group_message), TestOut(commit_paper_reviewed)]
+     SecretReview(review),
+     PublicLog(group_message),
+     PublicLog(commit_paper_reviewed)]->
+    [!Reviewer_Reviewed_Paper($Reviewer, paper(~paper), randomness(~r_review), randomness(~r_grade), ~group_key),
+     Discussing($Reviewer, paper(~paper)),
+     TestOut(group_message),
+     TestOut(commit_paper_reviewed)]
 
 /*
 Phase 4: Discussion
@@ -215,126 +256,101 @@ Phase 4: Discussion
 3. PC picks paper
 */
 
-rule Discussion_1_reviewers_discuss:
+rule Discussion_1_1_reviewers_discuss:
   let
-  	group_message2 = senc(revealSign(<makeReview(paper(~paper), $Reviewer2)>, ~reviewer_privk2), ~group_key)
-  	group_message3 = senc(revealSign(<makeReview(paper(~paper), $Reviewer3)>, ~reviewer_privk3), ~group_key)
+    discussion = makeDiscussion(paper(~paper))
+    encrypted_discussion = senc(revealSign(discussion, ~reviewer_privk), ~group_key)
+  in
+    [!Reviewer_Reviewed_Paper($Reviewer, paper(~paper), randomness(~r_review), randomness(~r_grade), ~group_key),
+     !Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pc_pubk),
+     Discussing($Reviewer, paper(~paper))]
+  --[DiscussedPaper($Reviewer, paper(~paper), ~group_key),
+     OnlyOnceWith(<'Discussion_1_1', $Reviewer, ~paper>),
+     PublicLog(encrypted_discussion)]->
+    [Discussing($Reviewer, paper(~paper)),
+     TestOut(encrypted_discussion)]
 
-
-  	discussion = makeDiscussion(paper(~paper))
+rule Discussion_1_2_finished_discussing:
+  let
   	grade = makeGrade(paper(~paper))  
+    encrypted_conclusion = senc(revealSign(grade, ~reviewer_privk), ~group_key)
   	paper_review_commit = commit(paper(~paper), randomness(~r_review))
   	commit_paper_discussed = revealSign(<paper_review_commit, 'discussed'>, ~reviewer_privk)
   	commit_paper_grade = revealSign(commit(grade, randomness(~r_grade)), ~reviewer_privk)
   	commit_pair = <commit_paper_discussed, commit_paper_grade>
-
-  	encrypted_conclusion = senc(revealSign(<discussion, grade>, ~reviewer_privk), ~group_key)
   in
-    [Reviewer_Reviewed_Paper($Reviewer, paper(~paper), randomness(~r_review), randomness(~r_grade)),
-     !Reviewer($Reviewer, ~key, ~reviewer_privk, pc_pubk),
-     TestIn(group_message2), TestIn(group_message3)]
-  --[DiscussedPaper($Reviewer, paper(~paper), ~group_key),
-     NotEq(~reviewer_privk, ~reviewer_privk2),
-  	 NotEq(~reviewer_privk, ~reviewer_privk3),
-     NotEq(~reviewer_privk2, ~reviewer_privk3)]->
-    [TestOut(encrypted_conclusion), TestOut(commit_pair)]
+    [Discussing($Reviewer, paper(~paper)),
+     !Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pc_pubk),
+     !Reviewer_Reviewed_Paper($Reviewer, paper(~paper), randomness(~r_review), randomness(~r_grade), ~group_key)]
+  --[PublicLog(encrypted_conclusion),
+     PublicLog(commit_pair)]-> 
+    [TestOut(encrypted_conclusion), 
+     TestOut(commit_pair)]
 
 rule Discussion_2_pc_receives_discussion_and_grade:
   let
     discussion = makeDiscussion(paper(~paper))
     grade = makeGrade(paper(~paper))
-    encrypted_conclusion1 = senc(revealSign(<discussion, grade>, ~reviewer_privk1), ~group_key)
-    encrypted_conclusion2 = senc(revealSign(<discussion, grade>, ~reviewer_privk2), ~group_key)
-    encrypted_conclusion3 = senc(revealSign(<discussion, grade>, ~reviewer_privk3), ~group_key)
-
-    group_message1 = senc(revealSign(<makeReview(paper(~paper), $Reviewer1)>, ~reviewer_privk1), ~group_key)
-    group_message2 = senc(revealSign(<makeReview(paper(~paper), $Reviewer2)>, ~reviewer_privk2), ~group_key)
-    group_message3 = senc(revealSign(<makeReview(paper(~paper), $Reviewer3)>, ~reviewer_privk3), ~group_key)
-
-    sumbitter_response = senc(<discussion, grade, makeReview(paper(~paper), $Reviewer1), makeReview(paper(~paper), $Reviewer2), makeReview(paper(~paper), $Reviewer3)>, ~submitter_key)
+    encrypted_discussion = senc(revealSign(discussion, ~reviewer_privk), ~group_key)
+    encrypted_conclusion = senc(revealSign(grade, ~reviewer_privk), ~group_key)
+    group_message = senc(revealSign(<makeReview(paper(~paper), $Reviewer)>, ~reviewer_privk), ~group_key)
+    
+    submitter_response = senc(<discussion, grade, makeReview(paper(~paper), $Reviewer)>, ~submitter_key)
   in
-    [PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer1, $Reviewer2, $Reviewer3, ~group_key),
-     !PC_Reviewer_Association($Reviewer1, ~reviewer_key1, pk(~reviewer_privk1)),
-     !PC_Reviewer_Association($Reviewer2, ~reviewer_key2, pk(~reviewer_privk2)),
-     !PC_Reviewer_Association($Reviewer3, ~reviewer_key3, pk(~reviewer_privk3)),
+    [PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key),
+     !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key),
-     TestIn(encrypted_conclusion1),
-     TestIn(encrypted_conclusion2),
-     TestIn(encrypted_conclusion3),
-     TestIn(group_message1),
-     TestIn(group_message2),
-     TestIn(group_message3)]
-  --[PCReceivedDiscussionFromReviewer($Reviewer1, paper(~paper), ~group_key),
-     PCReceivedDiscussionFromReviewer($Reviewer2, paper(~paper), ~group_key),
-     PCReceivedDiscussionFromReviewer($Reviewer3, paper(~paper), ~group_key),
-     OnlyOnceWith(<'PC_received_discussion', paper(~paper)>),
-     NotEq(~reviewer_privk1, ~reviewer_privk2),
-     NotEq(~reviewer_privk1, ~reviewer_privk3),
-     NotEq(~reviewer_privk2, ~reviewer_privk3),
-     SubmitterKeyUsed(~submitter_key)]->
-    [Ready_For_Decision(paper(~paper), grade, randomness(~r_submit), randomness(~r_review), randomness(~r_grade), ~reviewer_privk1, ~reviewer_privk2, ~reviewer_privk3, ~group_key)
-     //,TestOut(sumbitter_response)
-     ]
+     TestIn(encrypted_conclusion),
+     TestIn(group_message)]
+  --[PCReceivedDiscussionFromReviewer($Reviewer, paper(~paper), ~group_key),
+     OnlyOnceWith(<'Discussion_2', paper(~paper), $Reviewer>),
+     SubmitterKeyUsed(~submitter_key),
+     PublicLog(submitter_response)]->
+    [Ready_For_Decision($Reviewer, paper(~paper), grade, randomness(~r_submit), randomness(~r_review), randomness(~r_grade), ~reviewer_privk, ~group_key), 
+     TestOut(submitter_response)]
 
 rule Discussion_3_pc_paper_accepted:
   let
     accepted = <paper(~paper), randomness(~r_submit), randomness(~r_review)>
     signed_accepted = revealSign(accepted, ~pc_privk)
+    signed_grade = revealSign(grade, ~pc_privk)
   in
     [!PC($PC, ~pc_privk),
-     Ready_For_Decision(paper(~paper), grade, randomness(~r_submit), randomness(~r_review), randomness(~r_grade), ~reviewer_privk1, ~reviewer_privk2, ~reviewer_privk3, ~group_key)]
-  --[PaperAccepted(paper(~paper)),
+     Ready_For_Decision($Reviewer, paper(~paper), grade, randomness(~r_submit), randomness(~r_review), randomness(~r_grade), ~reviewer_privk, ~group_key)]
+  --[PaperAccepted($Reviewer, paper(~paper)),
      RandomReveal(~r_submit),
-     RandomReveal(~r_review)]->
-    [TestOut(signed_accepted), TestOut(revealSign(grade, ~pc_privk))]
+     RandomReveal(~r_review),
+     OnlyOnceWith(<'conclusion', ~paper>),
+     PublicLog(signed_accepted),
+     PublicLog(signed_grade)]->
+    [TestOut(signed_accepted), 
+     TestOut(signed_grade)]
 
 rule Discussion_3_pc_paper_rejected:
   let
-    group_message1 = senc(revealSign(<makeReview(paper(~paper), $Reviewer1)>, ~reviewer_privk1), ~group_key)
-    group_message2 = senc(revealSign(<makeReview(paper(~paper), $Reviewer2)>, ~reviewer_privk2), ~group_key)
-    group_message3 = senc(revealSign(<makeReview(paper(~paper), $Reviewer3)>, ~reviewer_privk3), ~group_key)
-
+    group_message = senc(revealSign(<makeReview(paper(~paper), $Reviewer)>, ~reviewer_privk), ~group_key)
     rejected_out = revealSign(<randomness(~r_grade), grade>, ~pc_privk)
   in
-    [Setup_PC($PC, ~pc_privk),
-     TestIn(group_message1), TestIn(group_message2), TestIn(group_message3),
-     Ready_For_Decision(paper(~paper), grade, randomness(~r_submit), randomness(~r_review) ,randomness(~r_grade), ~reviewer_privk1, ~reviewer_privk2, ~reviewer_privk3, ~group_key)]
-  --[PaperRejected(paper(~paper)),
-     RandomReveal(~r_grade)]->
+    [!PC($PC, ~pc_privk),
+     TestIn(group_message),
+     Ready_For_Decision($Reviewer, paper(~paper), grade, randomness(~r_submit), randomness(~r_review), randomness(~r_grade), ~reviewer_privk, ~group_key)]
+  --[PaperRejected($Reviewer, paper(~paper)),
+     RandomReveal(~r_grade),
+     OnlyOnceWith(<'conclusion', ~paper>),
+     PublicLog(rejected_out)]->
     [TestOut(rejected_out)]
-
-lemma sanity_one:
-exists-trace
-"Ex R p r R2 R3 R_key R_privk b g_k #h #i #j #k #l #m #n #o #p #q #r.
-    ReviewerSetup(R, R_key, R_privk) @h
-    & SubmittedPaper(commit(p,r)) @i
-    & PCReceivedPaper(commit(p,r)) @j
-    & PCSendsPaperToReviewer(R, senc(p, R_key)) @k
-    & BidOnPaper(R, R_key, p) @l
-    & PCReceivedBid(R, b) @m
-    & MatchedPaper(p, R, R2, R3, g_k) @n
-    & ReviewedPaper(R, p, g_k) @o
-    & DiscussedPaper(R, p, g_k) @p
-    & PCReceivedDiscussionFromReviewer(R, p, g_k) @q
-    & PaperAccepted(p) @r
-"
-
-lemma sanity_only_paper_accepted:
-exists-trace
-"Ex p #r. 
-   PaperAccepted(p) @r
-"
-
-lemma sanity_only_paper_rejected:
-exists-trace
-"Ex p #r. 
-   PaperRejected(p) @r
-"
 
 lemma key_secret [reuse, use_induction]:
 all-traces 
-"All k #i. KeySecret(k) @i ==> not(Ex #j. KU(k) @j)
+"All k #i. KeySecret(k) @i ==> not(Ex #j. K(k) @j)
 "
+
+/*
+lemma paper_secret [reuse, use_induction]:
+all-traces 
+"All p #i. PaperSecret(p) @i ==> not(Ex #j. K(p) @j)
+"
+*/
 /*
 lemma randomness_secret [reuse]:
 all-traces 
@@ -342,18 +358,96 @@ all-traces
 "
 */
 
-lemma paper_secrecy [reuse]:
+
+
+lemma paper_secrecy_accepted [reuse]:
 "All p r #i #j.
- SubmittedPaper(commit(p,r))@i &
- K(p)@j 
+ SubmittedPaper(commit(p,r)) @i &
+ K(p) @j 
  ==> 
- Ex #k. PaperAccepted(p) @k
+ Ex R #k. PaperAccepted(R, p) @k
 "
 
-lemma review_secrecy:
+lemma paper_secrecy_rejected [reuse]:
+"All p r R #i #j.
+ SubmittedPaper(commit(p,r)) @i &
+ PaperRejected(R, p) @j 
+ ==> 
+ not(Ex #k. K(p) @k)
+"
+
+lemma review_secrecy [reuse]:
 "All R p r #i #j. 
-SubmittedPaper(commit(p,r))@i &
-SecretReview(makeReview(p, R)) @j ==> not(Ex #k. K(makeReview(p, R))@k)
+ SubmittedPaper(commit(p,r)) @i &
+ SecretReview(makeReview(p, R)) @j ==> not(Ex #k. K(makeReview(p, R)) @k)
+"
+
+// Verifiability paper accepted was submitted
+lemma paper_accepted_was_submitted_verifiabillity_completeness:
+"All  p r_submit r_review pc_privk #k.
+  PublicLog(revealSign(<p, r_submit, r_review>, pc_privk)) @k &
+  not(Ex #a. AdversaryIn() @a) &
+  not(Ex #a. AdversaryOut() @a) &
+  not(Ex #a. MisbehavingActor(p) @a)
+==>
+(Ex s_privk #i #j.
+  PublicLog(revealSign(commit(p, r_submit), s_privk)) @i &
+  PublicLog(revealSign(commit(p, r_submit), pc_privk)) @j &
+  i < j &
+  j < k &
+  not(s_privk = pc_privk)
+  )
+"
+
+lemma paper_accepted_was_submitted_verifiability_soundness_1_exists_trace_where_false:
+exists-trace
+"Ex p r_submit r_review pc_privk #k.
+  PublicLog(revealSign(<p, r_submit, r_review>, pc_privk)) @k &
+  not(
+    (Ex s_privk #i. PublicLog(revealSign(commit(p, r_submit), s_privk))@i & i < k) |
+    (Ex #i. PublicLog(revealSign(commit(p, r_submit), pc_privk))@i & i < k)
+  )
+"
+
+lemma paper_accepted_was_submitted_verifiability_soundness_2_true_no_adversary:
+"All p r_submit r_review s_privk pc_privk #i #j #k.
+  PublicLog(revealSign(<p, r_submit, r_review>, pc_privk)) @k &
+  PublicLog(revealSign(commit(p, r_submit), s_privk)) @i &
+  PublicLog(revealSign(commit(p, r_submit), pc_privk)) @j &
+  i < j &
+  j < k &
+  not(s_privk = pc_privk)
+==>
+  not(Ex #a. MisbehavingActor(p) @a)
+"
+
+
+lemma sanity_one:
+exists-trace
+"Ex R p r R_key R_privk b g_k #h #i #j #k #l #m #n #o #p #q #r.
+    ReviewerSetup(R, R_key, R_privk) @h
+    & SubmittedPaper(commit(p,r)) @i
+    & PCReceivedPaper(commit(p,r)) @j
+    & PCSendsPaperToReviewer(R, p) @k
+    & BidOnPaper(R, R_key, p) @l
+    & PCReceivedBid(R, b, p) @m
+    & MatchedPaper(p, R, g_k) @n
+    & ReviewedPaper(R, p, g_k) @o
+    & DiscussedPaper(R, p, g_k) @p
+    & PCReceivedDiscussionFromReviewer(R, p, g_k) @q
+    & PaperAccepted(R, p) @r
+"
+
+lemma sanity_only_paper_accepted:
+exists-trace
+"Ex R p #r. 
+   PaperAccepted(R, p) @r
+"
+
+lemma sanity_only_paper_rejected:
+exists-trace
+"Ex R p #r. 
+   PaperRejected(R, p) @r
 "
 
 //Restrictions
@@ -361,11 +455,6 @@ SecretReview(makeReview(p, R)) @j ==> not(Ex #k. K(makeReview(p, R))@k)
 // " All x y #i. Eq(x,y) @i ==> x = y
     
 // "
-
-restriction NotEq:
-" All x y #i. NotEq(x,y) @i ==> not(x = y)
-    
-"
 
 restriction OnlyOnceWith:
 " All x #i #j. OnlyOnceWith(x) @i & OnlyOnceWith(x) @j ==> #i=#j
