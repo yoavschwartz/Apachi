@@ -12,6 +12,10 @@ builtins: symmetric-encryption, hashing, asymmetric-encryption, revealing-signin
 functions: commit/2, commitRelationProof/2, checkCommitRelationProof/3, makeDiscussion/1, makeGrade/1,
            makeReview/2 [private], paper/1, randomness/1, gradeProof/2, checkGradeProof/3
 
+/*
+Create a log which an adversary can use
+*/
+
 rule LogOut:
     [LogOut(m)]
   --[]->
@@ -28,17 +32,14 @@ rule PublicLogIn:
     [LogIn(m)]
 
 rule PublicLogOut:
-    [!Test(m)]
+    [!Log(m)]
   --[AdversaryOut()]->
     [Out(m)]
 
-
 /*
- * Setting up our own secure, authenticated and replay resistant channels.
- * A: Sender
- * B: Receiver
- * x: message
- */
+Setup actors
+*/
+
 rule Setup: 
     let 
     pc_pubk = pk(~pc_privk)
@@ -76,6 +77,7 @@ rule Setup_reviewer:
      KeySecret(~reviewer_privk)]->
     [!PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      !Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pc_pubk)]
+
 
 /*
 Phase 1: Submission
@@ -352,6 +354,12 @@ rule Discussion_3_2_pc_paper_rejected:
      OnlyOnceWith(<'conclusion', ~paper>),
      PublicLog('Discussion_3_2', rejected_out)]->
     [LogOut(rejected_out)]
+
+
+/*
+Lemmas
+*/
+
 
 lemma key_secret [reuse, use_induction]:
 all-traces 
