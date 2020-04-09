@@ -120,7 +120,7 @@ rule Matching_2_reviewer_sends_bids:
     [!Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pc_pubk),
      TestIn(encrypted_commit),
      Fr(~bid)]
-  --[BidOnPaper($Reviewer, ~reviewer_key, ~paper),
+  --[BidOnPaper($Reviewer, ~reviewer_privk, ~reviewer_key, ~paper),
      OnlyOnceWith(<'Matching_2', $Reviewer, ~paper>)]->
     [Reviewer_Bid_On_Paper($Reviewer, ~paper),
      TestOut(signed_bid)]
@@ -272,7 +272,7 @@ exists-trace
     & SubmittedPaper(commit(p,r)) @i
     & PCReceivedPaper(commit(p,r)) @j
     & PCSendsPaperToReviewer(R, senc(commit(p,r), R_key)) @k
-    & BidOnPaper(R, R_key, p) @l
+    & BidOnPaper(R, R_privk, R_key, p) @l
     & PCReceivedBid(R, revealSign(<commit(p,r), b>, R_privk)) @m
     & MatchedPaper(p, R, R2, R3, g_k) @n
     & ReviewedPaper(R, p, g_k) @o
