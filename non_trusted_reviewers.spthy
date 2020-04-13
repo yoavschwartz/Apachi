@@ -38,7 +38,7 @@ rule Log_in:
 
 rule PublicLog_in:
     [In(m)]
-  --[AdversaryIn(), AdversaryM(m)]->
+  --[AdversaryIn(), PublicLog(<'Submission_1', m>)]->
     [!On_Log(m)]
 
 rule PublicLog_out:
@@ -1018,50 +1018,6 @@ lemma paper_accepted_accountability_soundness_2_not_goal_adversary:
 
     // Paper submit commit log made by Submitter
     PublicLog(<'Submission_1', revealSignCustom(commit(p, r_submit), s_privk)>) @k &
-
-    // Paper submit commit log made by PC
-    PublicLog(<'Submission_2', revealSignCustom(commit(p, r_submit), pc_privk)>) @l &
-
-    // Paper matching log made by PC
-    PublicLog(<'Matching_3', revealSignCustom(<commit(p, r_review), pk(r_privk)>, pc_privk)>) @m &
-
-    // Paper review commit log made by Reviewer
-    PublicLog(<'Reviewing_1', revealSignCustom(<commit(p, r_review), 'reviewed'>, r_privk)>) @n &
-
-    // Paper discussion commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(<commit(p, r_review), 'discussed'>, r_privk)>) @o &
-
-    // Paper grade commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(grade_commit, r_privk)>) @o &
-
-    // Grade reveal log made by PC
-    PublicLog(<'Discussion_3_1', revealSignCustom(grade, pc_privk)>) @p &
-
-    // Grade proof log made by PC (this is modelled as a one to one proof, but the protocol has a many to many proof instead)
-    PublicLog(<'Discussion_3_1', revealSignCustom(gradeProof(grade, grade_commit), pc_privk)>) @p &
-
-    // Paper acceptance log made by PC
-    PublicLog(<'Discussion_3_1', revealSignCustom(<p, r_submit, r_review>, pc_privk)>) @p &
-
-    // Making sure the paper haven't been rejected by PC
-    not(Ex r_grade #y. PublicLog(<'Discussion_3_2', revealSignCustom(<commit(p, r_review), r_grade, grade>, pc_privk)>) @y) &
-
-    // Making sure that things happen in right order
-    #k < #l &
-    #l < #m &
-    #m < #n &
-    #n < #o &
-    #o < #p
-  )
-
-  &
-
-  // The accountability test is true
-  not(Ex r_privk r_submit s_privk pc_privk grade grade_commit
-         #k #l #m #n #o #p.
-
-    // Paper submit commit log made by Submitter
-    AdversaryM(revealSignCustom(commit(p, r_submit), s_privk)) @k &
 
     // Paper submit commit log made by PC
     PublicLog(<'Submission_2', revealSignCustom(commit(p, r_submit), pc_privk)>) @l &
