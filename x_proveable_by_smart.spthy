@@ -1,30 +1,24 @@
-theory untrusted_reviewers
+theory x_proveable_by_smart
 begin
 
 /*
- *  Author: Yoav.s&Nicolai.s
+ *  Author: Yoav S. & Nicolai S.
  *  Model Name: untrusted_reviewers.spthy
  *  Status: DEVELOPMENTAL
  *
  */
 
-builtins: hashing, asymmetric-encryption
+builtins: hashing, asymmetric-encryption, symmetric-encryption
 functions: commit/2, commitRelationProof/2, checkCommitRelationProof/3, makeDiscussion/1, makeGrade/1,
            makeReview/2 [private], paper/1, randomness/1, gradeProof/2, checkGradeProof/3,
-           revealSignCustom/2 [private], getMessageCustom/1, senc/2 [private], sdec/2
-equations: getMessageCustom(revealSignCustom(m,sk)) = m,
-           sdec(senc(m, k), k) = m
+           revealSignCustom/2 [private], getMessageCustom/1
+equations: getMessageCustom(revealSignCustom(m,sk)) = m
 
 
 rule Generate_revealing_signature:
     [In(m), In(~sk)]
   --[KSign(revealSignCustom(m, ~sk))]->
     [Out(revealSignCustom(m, ~sk))]
-
-rule Generate_symmetric_encryption:
-    [In(m), In(~sk)]
-  --[KEnc(senc(m, ~sk))]->
-    [Out(senc(m, ~sk))]
 
 
 /*
@@ -132,9 +126,10 @@ rule Submission_1_submitter_submits:
     submission_key = aenc(~submitter_key, pk(~pc_privk))
     signed_submission_key = revealSignCustom(submission_key, ~S_privk)
   in
-    [Fr(~paper), Fr(~r_submit), Fr(~r_review), Fr(~r_id), Fr(~submitter_key),
+    [Fr(~paper), Fr(~r_submit), Fr(~r_review), Fr(~submitter_key),
      !Submitter_Ready_To_Submit($Submitter, pk(~pc_privk), ~S_privk)]
   --[SubmittedPaper(~S_privk, paper(~paper)),
+     SubmitterKnowledge(paper(~paper), ~S_privk, randomness(~r_submit), randomness(~r_review), ~submitter_key),
      PublicLog(<'Submission_1', signed_paper_commit>),
      PublicLog(<'Submission_1', signed_submission>),
      PublicLog(<'Submission_1', signed_submission_key>),
@@ -373,13 +368,14 @@ rule Discussion_3_2_pc_paper_rejected:
 -------------------------------------------------------------------------------
 */
 
+
 /*
 =============
 Helper lemmas
 =============
 */
 
-lemma test_1 [reuse]:
+lemma helper_pc_signature_requires_pc_privk [reuse]:
 "All pc_privk m #i #j.
   PCPrivk(pc_privk) @i &
   KSign(revealSignCustom(m, pc_privk)) @j
@@ -387,7 +383,7 @@ lemma test_1 [reuse]:
   Ex #k. KeyRevealedPC(pc_privk) @k
 "
 
-lemma test_2 [reuse]:
+lemma helper_pc_privk_requires_key_reveal_pc [reuse]:
 "All pc_privk #i #j.
   PCPrivk(pc_privk) @i &
   K(pc_privk) @j
@@ -395,7 +391,7 @@ lemma test_2 [reuse]:
   Ex #k. KeyRevealedPC(pc_privk) @k
 "
 
-lemma test_3 [reuse]:
+lemma helper_signature_requires_privk [reuse]:
 "All privk m #i #j.
   PrivateKey(privk) @i &
   KSign(revealSignCustom(m, privk)) @j
@@ -403,28 +399,19 @@ lemma test_3 [reuse]:
   Ex #k. KeyRevealed(privk) @k
 "
 
-lemma test_4 [reuse]:
+lemma helper_paper_accepted_not_rejected [reuse]:
 "All p r #i.
  PaperAccepted(commit(p, r)) @i
  ==>
  not(Ex r #k. PaperRejected(commit(p, r)) @k)
 "
 
-lemma test_5 [reuse]:
+lemma helper_paper_rejected_not_accepted [reuse]:
 "All p r #i.
  PaperRejected(commit(p, r)) @i
  ==>
  not(Ex r #k. PaperAccepted(commit(p, r)) @k)
 "
-
-lemma test_6 [reuse]:
-"All k m #i #j.
-  KeySecret(k) @i &
-  KEnc(senc(m, k)) @j
-==>
-  Ex k2 #k. KeyRevealed(k2) @k
-"
-
 
 /*
 =======
@@ -461,18 +448,18 @@ lemma paper_secrecy_rejected:
 "
 
 lemma review_secrecy:
-"All R s_privk p #i #j.
+"All R s_privk p #i #j #k.
  SubmittedPaper(s_privk, p) @i &
  SecretReview(makeReview(p, R)) @j &
- not(Ex k #k. KeyRevealed(k) @k)
+ K(makeReview(p, R)) @k
  ==>
- not(Ex #k. K(makeReview(p, R)) @k)
+ Ex k #k. KeyRevealed(k) @k
 "
 
 /*
-=============
-Verifiability
-=============
+=======================
+Universal Verifiability
+=======================
 */
 
 //-------Paper accepted--------------------------------------------------------
@@ -544,59 +531,6 @@ lemma paper_accepted_verifiabillity_completeness:
     #o < #p
   )
 "
-
-#ifdef exist
-
-lemma paper_accepted_verifiability_soundness_1_exists_trace_where_false:
-exists-trace
-"Ex p r_review #x.
-
-  // Paper accepted
-  PaperAccepted(commit(p, r_review)) @x
-
-  &
-
-  // The verifiability test is false
-  not(Ex r_privk r_submit s_privk pc_privk grade grade_commit
-         #k #l #m #n #o #p.
-
-    // Paper submit commit log made by Submitter
-    PublicLog(<'Submission_1', revealSignCustom(commit(p, r_submit), s_privk)>) @k &
-
-    // Paper submit commit log made by PC
-    PublicLog(<'Submission_2', revealSignCustom(commit(p, r_submit), pc_privk)>) @l &
-
-    // Paper matching log made by PC
-    PublicLog(<'Matching_3', revealSignCustom(<commit(p, r_review), pk(r_privk)>, pc_privk)>) @m &
-
-    // Paper review commit log made by Reviewer
-    PublicLog(<'Reviewing_1', revealSignCustom(<commit(p, r_review), 'reviewed'>, r_privk)>) @n &
-
-    // Paper discussion commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(<commit(p, r_review), 'discussed'>, r_privk)>) @o &
-
-    // Paper grade commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(grade_commit, r_privk)>) @o &
-
-    // Grade reveal log made by PC
-    PublicLog(<'Discussion_3_1', revealSignCustom(grade, pc_privk)>) @p &
-
-    // Grade proof log made by PC (this is modelled as a one to one proof, but the protocol has a many to many proof instead)
-    PublicLog(<'Discussion_3_1', revealSignCustom(gradeProof(grade, grade_commit), pc_privk)>) @p &
-
-    // Paper acceptance log made by PC
-    PublicLog(<'Discussion_3_1', revealSignCustom(<p, r_submit, r_review>, pc_privk)>) @p &
-
-    // Making sure that things happen in right order
-    #k < #l &
-    #l < #m &
-    #m < #n &
-    #n < #o &
-    #o < #p
-  )
-"
-
-#endif
 
 lemma paper_accepted_verifiability_soundness_2_true_no_adversary:
 "All p r_submit r_review r_privk s_privk pc_privk grade grade_commit
@@ -730,56 +664,6 @@ lemma paper_rejected_verifiabillity_completeness:
   )
 "
 
-#ifdef exist
-
-lemma paper_rejected_verifiability_soundness_1_exists_trace_where_false:
-exists-trace
-"Ex review_commit #x.
-
-  // Paper rejected
-  PaperRejected(review_commit) @x
-
-  &
-
-  // The verifiability test is false
-  not(Ex s_privk r_privk submit_commit review_commit pc_privk r_grade grade
-         #i #j #k #l #m #n.
-
-    // Paper submit commit log made by Submitter
-    PublicLog(<'Submission_1', revealSignCustom(submit_commit, s_privk)>) @i &
-
-    // Paper submit commit log made by PC
-    PublicLog(<'Submission_2', revealSignCustom(submit_commit, pc_privk)>) @j &
-
-    // Paper matching log made by PC
-    PublicLog(<'Matching_3', revealSignCustom(<review_commit, pk(r_privk)>, pc_privk)>) @k &
-
-    // Proof that submit and review commit are hiding the same paper log by PC
-    PublicLog(<'Matching_3', commitRelationProof(review_commit, submit_commit)>) @k &
-
-    // Paper review commit log made by Reviewer
-    PublicLog(<'Reviewing_1', revealSignCustom(<review_commit, 'reviewed'>, r_privk)>) @l &
-
-    // Paper discussion commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(<review_commit, 'discussed'>, r_privk)>) @m &
-
-    // Paper grade commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(commit(grade, r_grade), r_privk)>) @m &
-
-    // Paper rejected log made by PC
-    PublicLog(<'Discussion_3_2', revealSignCustom(<review_commit, r_grade, grade>, pc_privk)>) @n &
-
-    // Making sure that things happen in right order
-    #i < #j &
-    #j < #k &
-    #k < #l &
-    #l < #m &
-    #m < #n
-  )
-"
-
-#endif
-
 lemma paper_rejected_verifiability_soundness_2_true_no_adversary:
 "All r_grade grade pc_privk s_privk r_privk submit_commit review_commit
      #i #j #k #l #m #n.
@@ -841,17 +725,14 @@ lemma paper_rejected_verifiability_soundness_2_true_no_adversary:
   h < i
 "
 
-
 /*
-===================
-Accountability - PC
-===================
+=======================
+Individual Verifiability
+=======================
 */
 
-//-------Paper accepted--------------------------------------------------------
-
-lemma paper_accepted_accountability_completeness:
-"All R r_privk r_key g_k p bid r_review r_submit pc_privk grade grade_commit
+lemma paper_rejected_submitter_verifiabillity_completeness:
+"All bid p pc_privk R R2 r_privk r_key g_k grade r_grade r_review r_submit
      #b #c #d #e #f #g #h #i.
 
   // Goal convergent
@@ -861,9 +742,9 @@ lemma paper_accepted_accountability_completeness:
   MatchedPaper(p, R, g_k) @e &
   ReviewedPaper(R, p) @f &
   DiscussedPaper(R, p) @g &
-  GradeGiven(R, p, grade, grade_commit) @g &
-  PCReceivedDiscussionFromReviewer(R, p, g_k) @h &
-  PaperAccepted(commit(p, r_review)) @i &
+  GradeGiven(R, p, grade, commit(grade, r_grade)) @g &
+  PCReceivedDiscussionFromReviewer(R2, p, g_k) @h &
+  PaperRejected(commit(p, r_review)) @i &
 
   b < c &
   c < e &
@@ -873,174 +754,111 @@ lemma paper_accepted_accountability_completeness:
   g < h &
   h < i &
 
-  // PC is not an adversary
-  not(Ex k #a. KeyRevealedPC(k) @a)
+  // There is no adversary
+  not(Ex #a. AdversaryIn() @a) &
+  not(Ex k #a. KeyRevealed(k) @a)
 
 ==>
 
-  // Accountability test is false
-  (Ex s_privk #k #l #m #n #o #p.
+  // Verifiability test is true
+  (Ex discussion review s_key s_privk #h #i #j #k #l #m #n #o.
+
+    // Submitter knowledge
+    SubmitterKnowledge(p, s_privk, r_submit, r_review, s_key) @h &
 
     // Paper submit commit log made by Submitter
-    PublicLog(<'Submission_1', revealSignCustom(commit(p, r_submit), s_privk)>) @k &
+    PublicLog(<'Submission_1', revealSignCustom(commit(p, r_submit), s_privk)>) @i &
 
     // Paper submit commit log made by PC
-    PublicLog(<'Submission_2', revealSignCustom(commit(p, r_submit), pc_privk)>) @l &
+    PublicLog(<'Submission_2', revealSignCustom(commit(p, r_submit), pc_privk)>) @j &
 
     // Paper matching log made by PC
-    PublicLog(<'Matching_3', revealSignCustom(<commit(p, r_review), pk(r_privk)>, pc_privk)>) @m &
+    PublicLog(<'Matching_3', revealSignCustom(<commit(p, r_review), pk(r_privk)>, pc_privk)>) @k &
+
+    // Proof that submit and review commit are hiding the same paper log by PC
+    PublicLog(<'Matching_3', commitRelationProof(commit(p, r_review), commit(p, r_submit))>) @k &
 
     // Paper review commit log made by Reviewer
-    PublicLog(<'Reviewing_1', revealSignCustom(<commit(p, r_review), 'reviewed'>, r_privk)>) @n &
+    PublicLog(<'Reviewing_1', revealSignCustom(<commit(p, r_review), 'reviewed'>, r_privk)>) @l &
 
     // Paper discussion commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(<commit(p, r_review), 'discussed'>, r_privk)>) @o &
+    PublicLog(<'Discussion_1_2', revealSignCustom(<commit(p, r_review), 'discussed'>, r_privk)>) @m &
 
     // Paper grade commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(grade_commit, r_privk)>) @o &
+    PublicLog(<'Discussion_1_2', revealSignCustom(commit(grade, r_grade), r_privk)>) @m &
 
-    // Grade reveal log made by PC
-    PublicLog(<'Discussion_3_1', revealSignCustom(grade, pc_privk)>) @p &
+    // Submitter response log made by PC
+    PublicLog(<'Discussion_2', senc(<discussion, grade, review>, s_key)>) @n &
 
-    // Grade proof log made by PC (this is modelled as a one to one proof, but the protocol has a many to many proof instead)
-    PublicLog(<'Discussion_3_1', revealSignCustom(gradeProof(grade, grade_commit), pc_privk)>) @p &
-
-    // Paper acceptance log made by PC
-    PublicLog(<'Discussion_3_1', revealSignCustom(<p, r_submit, r_review>, pc_privk)>) @p &
+    // Paper rejected log made by PC
+    PublicLog(<'Discussion_3_2', revealSignCustom(<commit(p, r_review), r_grade, grade>, pc_privk)>) @o &
 
     // Making sure that things happen in right order
+    #i < #j &
+    #j < #k &
     #k < #l &
     #l < #m &
     #m < #n &
-    #n < #o &
-    #o < #p
+    #n < #o
   )
 "
 
-#ifdef exist
+lemma paper_rejected_submitter_verifiability_soundness_2_true_no_adversary:
+"All p r_grade grade pc_privk s_privk r_privk r_submit r_review s_key review discussion
+     #h #i #j #k #l #m #n #o.
 
-lemma paper_accepted_accountability_soundness_1_exists_trace_where_false:
-exists-trace
-"Ex p r_review #x.
+  // Submitter knowledge
+  SubmitterKnowledge(p, s_privk, r_submit, r_review, s_key) @h &
 
-  // Paper accepted
-  PaperAccepted(commit(p, r_review)) @x
+  // Paper submit commit log made by Submitter
+  PublicLog(<'Submission_1', revealSignCustom(commit(p, r_submit), s_privk)>) @i &
 
-  &
+  // Paper submit commit log made by PC
+  PublicLog(<'Submission_2', revealSignCustom(commit(p, r_submit), pc_privk)>) @j &
 
-  not(Ex k #a. KeyRevealedOther(k) @a)
+  // Paper matching log made by PC
+  PublicLog(<'Matching_3', revealSignCustom(<commit(p, r_review), pk(r_privk)>, pc_privk)>) @k &
 
-  &
+  // Proof that submit and review commit are hiding the same paper log by PC
+  PublicLog(<'Matching_3', commitRelationProof(commit(p, r_review), commit(p, r_submit))>) @k &
 
-  // The accountability test is true
-  not(Ex r_privk r_submit pc_privk grade grade_commit
-         #l #m #n #o #p.
+  // Paper review commit log made by Reviewer
+  PublicLog(<'Reviewing_1', revealSignCustom(<commit(p, r_review), 'reviewed'>, r_privk)>) @l &
 
-    // Paper submit commit log made by PC
-    PublicLog(<'Submission_2', revealSignCustom(commit(p, r_submit), pc_privk)>) @l &
+  // Paper discussion commit log made by Reviewer
+  PublicLog(<'Discussion_1_2', revealSignCustom(<commit(p, r_review), 'discussed'>, r_privk)>) @m &
 
-    // Paper matching log made by PC
-    PublicLog(<'Matching_3', revealSignCustom(<commit(p, r_review), pk(r_privk)>, pc_privk)>) @m &
+  // Paper grade commit log made by Reviewer
+  PublicLog(<'Discussion_1_2', revealSignCustom(commit(grade, r_grade), r_privk)>) @m &
 
-    // Paper review commit log made by Reviewer
-    PublicLog(<'Reviewing_1', revealSignCustom(<commit(p, r_review), 'reviewed'>, r_privk)>) @n &
+  // Submitter response log made by PC
+  PublicLog(<'Discussion_2', senc(<discussion, grade, review>, s_key)>) @n &
 
-    // Paper discussion commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(<commit(p, r_review), 'discussed'>, r_privk)>) @o &
+  // Paper rejected log made by PC
+  PublicLog(<'Discussion_3_2', revealSignCustom(<commit(p, r_review), r_grade, grade>, pc_privk)>) @o &
 
-    // Paper grade commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(grade_commit, r_privk)>) @o &
-
-    // Grade reveal log made by PC
-    PublicLog(<'Discussion_3_1', revealSignCustom(grade, pc_privk)>) @p &
-
-    // Grade proof log made by PC (this is modelled as a one to one proof, but the protocol has a many to many proof instead)
-    PublicLog(<'Discussion_3_1', revealSignCustom(gradeProof(grade, grade_commit), pc_privk)>) @p &
-
-    // Paper acceptance log made by PC
-    PublicLog(<'Discussion_3_1', revealSignCustom(<p, r_submit, r_review>, pc_privk)>) @p &
-
-    // Making sure that things happen in right order
-    #l < #m &
-    #m < #n &
-    #n < #o &
-    #o < #p
-  )
-"
-
-#endif
-
-lemma paper_accepted_accountability_soundness_2_not_goal_adversary:
-"All p r_review #i.
-
-  PaperAccepted(commit(p, r_review)) @i
-
-  &
-
-  // The accountability test is true
-  not(Ex r_privk r_submit s_privk pc_privk grade grade_commit
-         #k #l #m #n #o #p.
-
-    // Paper submit commit log made by Submitter
-    PublicLog(<'Submission_1', revealSignCustom(commit(p, r_submit), s_privk)>) @k &
-
-    // Paper submit commit log made by PC
-    PublicLog(<'Submission_2', revealSignCustom(commit(p, r_submit), pc_privk)>) @l &
-
-    // Paper matching log made by PC
-    PublicLog(<'Matching_3', revealSignCustom(<commit(p, r_review), pk(r_privk)>, pc_privk)>) @m &
-
-    // Paper review commit log made by Reviewer
-    PublicLog(<'Reviewing_1', revealSignCustom(<commit(p, r_review), 'reviewed'>, r_privk)>) @n &
-
-    // Paper discussion commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(<commit(p, r_review), 'discussed'>, r_privk)>) @o &
-
-    // Paper grade commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(grade_commit, r_privk)>) @o &
-
-    // Grade reveal log made by PC
-    PublicLog(<'Discussion_3_1', revealSignCustom(grade, pc_privk)>) @p &
-
-    // Grade proof log made by PC (this is modelled as a one to one proof, but the protocol has a many to many proof instead)
-    PublicLog(<'Discussion_3_1', revealSignCustom(gradeProof(grade, grade_commit), pc_privk)>) @p &
-
-    // Paper acceptance log made by PC
-    PublicLog(<'Discussion_3_1', revealSignCustom(<p, r_submit, r_review>, pc_privk)>) @p &
-
-    // Making sure that things happen in right order
-    #k < #l &
-    #l < #m &
-    #m < #n &
-    #n < #o &
-    #o < #p
-  )
+  // Making sure that things happen in right order
+  #i < #j &
+  #j < #k &
+  #k < #l &
+  #l < #m &
+  #m < #n &
+  #n < #o
 
 ==>
-  Ex k #a.
 
-  KeyRevealedPC(k) @a
-"
-
-
-//-------Paper rejected--------------------------------------------------------
-
-lemma paper_rejected_accountability_completeness:
-"All R r_privk r_key g_k p bid r_review r_submit pc_privk grade r_grade submit_commit review_commit
-     #b #c #d #e #f #g #h #i.
+  Ex R R2 r_key g_k bid #b #c #d #e #f #g #h #i.
 
   // Goal convergent
-  PCReceivedPaper(pc_privk, submit_commit) @b &
-  submit_commit = commit(p, r_submit) &
+  PCReceivedPaper(pc_privk, commit(p, r_submit)) @b &
   PCSendsPaperToReviewer(R, p) @c &
   BidOnPaper(R, r_privk, r_key, bid, p) @d &
   MatchedPaper(p, R, g_k) @e &
   ReviewedPaper(R, p) @f &
   DiscussedPaper(R, p) @g &
   GradeGiven(R, p, grade, commit(grade, r_grade)) @g &
-  PCReceivedDiscussionFromReviewer(R, p, g_k) @h &
-  PaperRejected(review_commit) @i &
-  review_commit = commit(p, r_review) &
+  PCReceivedDiscussionFromReviewer(R2, p, g_k) @h &
+  PaperRejected(commit(p, r_review)) @i &
 
   b < c &
   c < e &
@@ -1048,181 +866,9 @@ lemma paper_rejected_accountability_completeness:
   e < f &
   f < g &
   g < h &
-  h < i &
-
-  // PC is not an adversary
-  not(Ex k #a. KeyRevealedPC(k) @a)
-
-==>
-
-  // Accountability test is false
-  (Ex s_privk #i #j #k #l #m #n.
-
-    // Paper submit commit log made by Submitter
-    PublicLog(<'Submission_1', revealSignCustom(submit_commit, s_privk)>) @i &
-
-    // Paper submit commit log made by PC
-    PublicLog(<'Submission_2', revealSignCustom(submit_commit, pc_privk)>) @j &
-
-    // Paper matching log made by PC
-    PublicLog(<'Matching_3', revealSignCustom(<review_commit, pk(r_privk)>, pc_privk)>) @k &
-
-    // Proof that submit and review commit are hiding the same paper log by PC
-    PublicLog(<'Matching_3', commitRelationProof(review_commit, submit_commit)>) @k &
-
-    // Paper review commit log made by Reviewer
-    PublicLog(<'Reviewing_1', revealSignCustom(<review_commit, 'reviewed'>, r_privk)>) @l &
-
-    // Paper discussion commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(<review_commit, 'discussed'>, r_privk)>) @m &
-
-    // Paper grade commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(commit(grade, r_grade), r_privk)>) @m &
-
-    // Paper rejected log made by PC
-    PublicLog(<'Discussion_3_2', revealSignCustom(<review_commit, r_grade, grade>, pc_privk)>) @n &
-
-    // Making sure that things happen in right order
-    #i < #j &
-    #j < #k &
-    #k < #l &
-    #l < #m &
-    #m < #n
-  )
+  h < i
 "
 
-#ifdef exist
-
-lemma paper_rejected_accountability_soundness_1_exists_trace_where_false:
-exists-trace
-"Ex review_commit #x.
-
-  // Paper rejected
-  PaperRejected(review_commit) @x
-
-  &
-
-  not(Ex k #a. KeyRevealedOther(k) @a)
-
-  &
-
-  // The accountability test is true
-  not(Ex s_privk r_privk submit_commit pc_privk r_grade grade
-         #i #j #k #l #m #n.
-
-    // Paper submit commit log made by Submitter
-    PublicLog(<'Submission_1', revealSignCustom(submit_commit, s_privk)>) @i &
-
-    // Paper submit commit log made by PC
-    PublicLog(<'Submission_2', revealSignCustom(submit_commit, pc_privk)>) @j &
-
-    // Paper matching log made by PC
-    PublicLog(<'Matching_3', revealSignCustom(<review_commit, pk(r_privk)>, pc_privk)>) @k &
-
-    // Proof that submit and review commit are hiding the same paper log by PC
-    PublicLog(<'Matching_3', commitRelationProof(review_commit, submit_commit)>) @k &
-
-    // Paper review commit log made by Reviewer
-    PublicLog(<'Reviewing_1', revealSignCustom(<review_commit, 'reviewed'>, r_privk)>) @l &
-
-    // Paper discussion commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(<review_commit, 'discussed'>, r_privk)>) @m &
-
-    // Paper grade commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(commit(grade, r_grade), r_privk)>) @m &
-
-    // Paper rejected log made by PC
-    PublicLog(<'Discussion_3_2', revealSignCustom(<review_commit, r_grade, grade>, pc_privk)>) @n &
-
-    // Making sure that things happen in right order
-    #i < #j &
-    #j < #k &
-    #k < #l &
-    #l < #m &
-    #m < #n
-  )
-"
-
-#endif
-
-lemma paper_rejected_accountability_soundness_2_not_goal_adversary:
-"All review_commit #i.
-
-  PaperRejected(review_commit) @i
-
-  &
-
-  // The accountability test is true
-  not(Ex s_privk r_privk submit_commit pc_privk r_grade grade
-         #i #j #k #l #m #n.
-
-    // Paper submit commit log made by Submitter
-    PublicLog(<'Submission_1', revealSignCustom(submit_commit, s_privk)>) @i &
-
-    // Paper submit commit log made by PC
-    PublicLog(<'Submission_2', revealSignCustom(submit_commit, pc_privk)>) @j &
-
-    // Paper matching log made by PC
-    PublicLog(<'Matching_3', revealSignCustom(<review_commit, pk(r_privk)>, pc_privk)>) @k &
-
-    // Proof that submit and review commit are hiding the same paper log by PC
-    PublicLog(<'Matching_3', commitRelationProof(review_commit, submit_commit)>) @k &
-
-    // Paper review commit log made by Reviewer
-    PublicLog(<'Reviewing_1', revealSignCustom(<review_commit, 'reviewed'>, r_privk)>) @l &
-
-    // Paper discussion commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(<review_commit, 'discussed'>, r_privk)>) @m &
-
-    // Paper grade commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSignCustom(commit(grade, r_grade), r_privk)>) @m &
-
-    // Paper rejected log made by PC
-    PublicLog(<'Discussion_3_2', revealSignCustom(<review_commit, r_grade, grade>, pc_privk)>) @n &
-
-    // Making sure that things happen in right order
-    #i < #j &
-    #j < #k &
-    #k < #l &
-    #l < #m &
-    #m < #n
-  )
-
-==>
-  Ex k #a.
-
-  KeyRevealedPC(k) @a
-"
-
-
-lemma sanity_one:
-exists-trace
-"Ex S_privk PC_privk R p r1  R_key R_privk b g_k r2
-    #h #i #j #k #l #m #n #o #p #q.
-    ReviewerSetup(R, R_key, R_privk) @h
-    & SubmittedPaper(S_privk, p) @i
-    & PCReceivedPaper(PC_privk, commit(p,r1)) @j
-    & PCSendsPaperToReviewer(R, p) @k
-    & BidOnPaper(R, R_privk, R_key, b, p) @l
-    & MatchedPaper(p, R, g_k) @m
-    & ReviewedPaper(R, p) @n
-    & DiscussedPaper(R, p) @o
-    & PCReceivedDiscussionFromReviewer(R, p, g_k) @p
-    & PaperAccepted(commit(p,r2)) @q
-    & BindReviewer(R, R_key, R_privk) @q
-"
-
-lemma sanity_only_paper_accepted:
-exists-trace
-"Ex p r #r.
-   PaperAccepted(commit(p,r)) @r
-"
-
-lemma sanity_only_paper_rejected:
-exists-trace
-"Ex p r #r.
-   PaperRejected(commit(p,r)) @r
-"
 
 //Restrictions
 // restriction Eq:
@@ -1234,6 +880,5 @@ restriction NotEq:
 
 restriction OnlyOnceWith:
 "All x #i #j. OnlyOnceWith(x) @i & OnlyOnceWith(x) @j ==> #i = #j"
-
 
 end
