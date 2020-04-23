@@ -58,8 +58,8 @@ rule Setup:
      KeySecret(~pc_privk),
      PCPrivk(~pc_privk),
      PrivateKey(~pc_privk)]->
-    [Setup_Submitter(pc_pubk), 
-     Setup_PC($PC, ~pc_privk), 
+    [!Setup_Submitter(pc_pubk),
+     Setup_PC($PC, ~pc_privk),
      !Setup_Reviewer(pc_pubk),
      Reveal_Key_PC(~pc_privk)]
 
@@ -67,7 +67,8 @@ rule Setup_submitter:
     let
     pc_pubk = pk(~pc_privk)
     in
-    [Setup_Submitter(pc_pubk), Fr(~S_privk)]
+    [!Setup_Submitter(pc_pubk),
+     Fr(~S_privk)]
   --[OnlyOnceWith(<'Setup_Submitter', $Submitter>),
      KeySecret(~S_privk),
      PrivateKey(~S_privk)]->
@@ -83,7 +84,9 @@ rule Setup_reviewer:
     let
     pc_pubk = pk(~pc_privk)
     in
-    [!Setup_Reviewer(pc_pubk), Fr(~reviewer_key), Fr(~reviewer_privk)]
+    [!Setup_Reviewer(pc_pubk),
+     Fr(~reviewer_key),
+     Fr(~reviewer_privk)]
   --[ReviewerSetup($Reviewer, ~reviewer_key, ~reviewer_privk),
      OnlyOnceWith(<'Setup_Reviewer', $Reviewer>),
      KeySecret(~reviewer_key),
@@ -536,6 +539,8 @@ lemma paper_accepted_verifiability_soundness_2_true_no_adversary:
 "All p r_submit r_review r_privk s_privk pc_privk grade grade_commit
      #k #l #m #n #o #p.
 
+  // Verifiability test is true
+
   // Paper submit commit log made by Submitter
   PublicLog(<'Submission_1', revealSignCustom(commit(p, r_submit), s_privk)>) @k &
 
@@ -668,6 +673,8 @@ lemma paper_rejected_verifiability_soundness_2_true_no_adversary:
 "All r_grade grade pc_privk s_privk r_privk submit_commit review_commit
      #i #j #k #l #m #n.
 
+  // Verifiability test is true
+
   // Paper submit commit log made by Submitter
   PublicLog(<'Submission_1', revealSignCustom(submit_commit, s_privk)>) @i &
 
@@ -760,11 +767,14 @@ lemma paper_rejected_submitter_verifiabillity_completeness:
 
 ==>
 
-  // Verifiability test is true
   (Ex discussion review s_key s_privk #h #i #j #k #l #m #n #o.
 
     // Submitter knowledge
-    SubmitterKnowledge(p, s_privk, r_submit, r_review, s_key) @h &
+    SubmitterKnowledge(p, s_privk, r_submit, r_review, s_key) @h
+
+    &
+
+    // Verifiability test is true
 
     // Paper submit commit log made by Submitter
     PublicLog(<'Submission_1', revealSignCustom(commit(p, r_submit), s_privk)>) @i &
@@ -808,7 +818,11 @@ lemma paper_rejected_submitter_verifiability_soundness_2_true_no_adversary:
      #h #i #j #k #l #m #n #o.
 
   // Submitter knowledge
-  SubmitterKnowledge(p, s_privk, r_submit, r_review, s_key) @h &
+  SubmitterKnowledge(p, s_privk, r_submit, r_review, s_key) @h
+
+  &
+
+  // Verifiability test is true
 
   // Paper submit commit log made by Submitter
   PublicLog(<'Submission_1', revealSignCustom(commit(p, r_submit), s_privk)>) @i &
