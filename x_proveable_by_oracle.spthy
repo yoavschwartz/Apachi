@@ -58,7 +58,7 @@ rule Setup:
      KeySecret(~pc_privk),
      PCPrivk(~pc_privk),
      PrivateKey(~pc_privk)]->
-    [Setup_Submitter(pc_pubk), 
+    [!Setup_Submitter(pc_pubk),
      Setup_PC($PC, ~pc_privk), 
      !Setup_Reviewer(pc_pubk),
      Reveal_Key_PC(~pc_privk)]
@@ -67,7 +67,8 @@ rule Setup_submitter:
     let
     pc_pubk = pk(~pc_privk)
     in
-    [Setup_Submitter(pc_pubk), Fr(~S_privk)]
+    [!Setup_Submitter(pc_pubk),
+     Fr(~S_privk)]
   --[OnlyOnceWith(<'Setup_Submitter', $Submitter>),
      KeySecret(~S_privk),
      PrivateKey(~S_privk)]->
@@ -83,7 +84,9 @@ rule Setup_reviewer:
     let
     pc_pubk = pk(~pc_privk)
     in
-    [!Setup_Reviewer(pc_pubk), Fr(~reviewer_key), Fr(~reviewer_privk)]
+    [!Setup_Reviewer(pc_pubk),
+     Fr(~reviewer_key),
+     Fr(~reviewer_privk)]
   --[ReviewerSetup($Reviewer, ~reviewer_key, ~reviewer_privk),
      OnlyOnceWith(<'Setup_Reviewer', $Reviewer>),
      KeySecret(~reviewer_key),
