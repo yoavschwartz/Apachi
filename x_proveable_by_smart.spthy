@@ -68,17 +68,15 @@ rule Setup_submitter:
     pc_pubk = pk(~pc_privk)
     in
     [!Setup_Submitter(pc_pubk),
-     Fr(~S_privk)]
-  --[OnlyOnceWith(<'Setup_Submitter', $Submitter>),
-     KeySecret(~S_privk),
-     PrivateKey(~S_privk)]->
-    [!Submitter_Ready_To_Submit($Submitter, pc_pubk, ~S_privk),
-     Reveal_Key_Other(~S_privk)]
+     Fr(~id)]
+  --[OnlyOnceWith(<'Setup_Submitter', $Submitter>)]->
+    [!Submitter_Ready_To_Submit($Submitter, pc_pubk, ~id)]
 
 rule Setup_pc:
     [Setup_PC($PC, ~pc_privk)]
   --[OnlyOnceWith('Setup_PC')]->
-    [!PC($PC, ~pc_privk), Out(pk(~pc_privk))]
+    [!PC($PC, ~pc_privk), 
+     Out(pk(~pc_privk))]
 
 rule Setup_reviewer:
     let
@@ -96,7 +94,8 @@ rule Setup_reviewer:
      !Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pc_pubk),
      Reveal_Key_PC(~reviewer_key),
      Reveal_Key_Other(~reviewer_key),
-     Reveal_Key_Other(~reviewer_privk)]
+     Reveal_Key_Other(~reviewer_privk),
+     Out(pk(~reviewer_privk))]
 
 
 /*
@@ -128,27 +127,36 @@ rule Submission_1_submitter_submits:
     signed_submission = revealSign(submission, ~S_privk)
     submission_key = aenc(~submitter_key, pk(~pc_privk))
     signed_submission_key = revealSign(submission_key, ~S_privk)
+    signed_identity_commit = revealSign(commit(~id, randomness(~r_id)), ~S_privk)
   in
-    [Fr(~paper), Fr(~r_submit), Fr(~r_review), Fr(~submitter_key),
-     !Submitter_Ready_To_Submit($Submitter, pk(~pc_privk), ~S_privk)]
+    [Fr(~paper), Fr(~r_submit), Fr(~r_review), Fr(~r_id), Fr(~submitter_key), Fr(~S_privk),
+     !Submitter_Ready_To_Submit($Submitter, pk(~pc_privk), ~id)]
   --[SubmittedPaper(~S_privk, paper(~paper)),
+     SubmittedPaperWithID(~id, ~r_id),
      SubmitterKnowledge(paper(~paper), ~S_privk, randomness(~r_submit), randomness(~r_review), ~submitter_key),
      PublicLog(<'Submission_1', signed_paper_commit>),
      PublicLog(<'Submission_1', signed_submission>),
      PublicLog(<'Submission_1', signed_submission_key>),
-     KeySecret(~submitter_key)]->
+     PublicLog(<'Submission_1', signed_identity_commit>),
+     KeySecret(~submitter_key),
+     KeySecret(~S_privk),
+     PrivateKey(~S_privk)]->
     [Log_Out(signed_paper_commit),
      Log_Out(signed_submission),
      Log_Out(signed_submission_key),
-     Waiting_For_Feedback($Submitter, pk(~pc_privk), ~S_privk, ~submitter_key, ~paper, ~r_review),
-     Reveal_Key_Other(~submitter_key)]
+     Log_Out(signed_identity_commit),
+     Waiting_For_Feedback($Submitter, pk(~pc_privk), ~S_privk, ~submitter_key, ~paper, ~r_review, ~id, ~r_id),
+     Reveal_Key_Other(~submitter_key),
+     Reveal_Key_Other(~S_privk),
+     Out(pk(~S_privk))]
 
 rule Submission_2_pc_receives_submission:
   let
     signed_submission = revealSign(senc(<paper(~paper), randomness(~r_submit), randomness(~r_review)>, ~submitter_key), ~S_privk)
     signed_submission_key = revealSign(aenc(~submitter_key, pk(~pc_privk)), ~S_privk)
-
     paper_commit = commit(paper(~paper), randomness(~r_submit))
+    signed_identity_commit = revealSign(commit(~id, randomness(~r_id)), ~S_privk)
+
     signed_paper_commit = revealSign(paper_commit, ~pc_privk)
   in
     [!PC($PC, ~pc_privk),
@@ -156,11 +164,12 @@ rule Submission_2_pc_receives_submission:
      Fr(~r_grade),
      Log_In(signed_submission),
      Log_In(signed_submission_key),
-     Log_In(revealSign(paper_commit, ~S_privk))]
+     Log_In(revealSign(paper_commit, ~S_privk)),
+     Log_In(signed_identity_commit)]
   --[PCReceivedPaper(~pc_privk, paper_commit),
      PublicLog(<'Submission_2', signed_paper_commit>),
      OnlyOnceWith(<'Submission_2', ~paper>)]->
-    [!Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key), 
+    [!Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit), 
      Log_Out(signed_paper_commit),
      !Group_For_Paper(paper(~paper), ~group_key, ~r_grade),
      Reveal_Key_PC(~group_key),
@@ -179,7 +188,7 @@ rule Matching_1_pc_sends_paper:
     encrypted_paper = revealSign(senc(paper(~paper), ~reviewer_key), ~pc_privk)
   in
     [!PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)), 
-     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key),
+     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
      !PC($PC, ~pc_privk)]
   --[OnlyOnceWith(<'Matching_1', $Reviewer, ~paper>),
      PublicLog(<'Matching_1', encrypted_paper>),
@@ -214,7 +223,7 @@ rule Matching_3_pc_matches_paper:
     commit_relation_proof = commitRelationProof(review_paper_commit, submit_paper_commit)
   in
     [!PC($PC, ~pc_privk),
-     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key),
+     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
      !Group_For_Paper(paper(~paper), ~group_key, ~r_grade),
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      Send_Paper_To_Reviewer($Reviewer, paper(~paper)),
@@ -330,7 +339,7 @@ rule Decision_1_pc_receives_discussion_and_grade:
     [!PC($PC, ~pc_privk),
      PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key),
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
-     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key),
+     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
      Log_Out(commit_paper_discussed),
      Log_In(encrypted_discussion),
      Log_In(encrypted_conclusion),
@@ -361,7 +370,8 @@ rule Decision_2_1_pc_paper_accepted:
      OnlyOnceWith(<'conclusion', ~paper>)]->
     [Log_Out(accepted_out),
      Log_Out(signed_grade),
-     Log_Out(grade_proof)]
+     Log_Out(grade_proof),
+     Waiting_For_Paper_Claim(~paper)]
 
 rule Decision_2_2_pc_paper_rejected:
   let
@@ -374,7 +384,7 @@ rule Decision_2_2_pc_paper_rejected:
      OnlyOnceWith(<'conclusion', ~paper>)]->
     [Log_Out(rejected_out)]
 
-rule Decision_3_submitter_receives_feedback:
+rule Decision_3_1_submitter_receives_feedback:
   let
     discussion = makeDiscussion(paper(~paper))
     grade = makeGrade(paper(~paper))
@@ -384,9 +394,37 @@ rule Decision_3_submitter_receives_feedback:
   in
     [Log_In(submitter_response),
      Log_In(matching),
-     Waiting_For_Feedback($Submitter, pk(~pc_privk), ~S_privk, ~submitter_key, ~paper, ~r_review)]
+     Waiting_For_Feedback($Submitter, pk(~pc_privk), ~S_privk, ~submitter_key, ~paper, ~r_review, ~id, ~r_id)]
   --[ReceivedFeedback(~S_privk, ~submitter_key, paper(~paper), randomness(~r_review), ~reviewer_privk, ~pc_privk)]->
-    []
+    [Submitter_Ready_For_Acceptance($Submitter, pk(~pc_privk), ~S_privk, ~submitter_key, ~paper, ~r_review, ~id, ~r_id)]
+
+rule Decision_3_2_submitter_claims_paper:
+  let
+    accepted = <paper(~paper), randomness(~r_submit), randomness(~r_review)>
+    accepted_out = revealSign(accepted, ~pc_privk)
+
+    signed_paper_claim = revealSign(<~id, ~r_id>, ~S_privk)
+  in
+    [Log_In(accepted_out),
+    Submitter_Ready_For_Acceptance($Submitter, pk(~pc_privk), ~S_privk, ~submitter_key, ~paper, ~r_review, ~id, ~r_id)]
+  --[PublicLog(<'Decision_3_2', signed_paper_claim>),
+     PaperClaimed(paper(~paper), ~id, ~r_id, ~S_privk)]->
+    [Log_Out(signed_paper_claim)]
+
+rule Decision_3_3_PC_confirms_paper_ownership:
+  let
+    signed_paper_claim = revealSign(<~id, ~r_id>, ~S_privk)
+    signed_identity_commit = revealSign(commit(~id, randomness(~r_id)), ~S_privk)
+
+    signed_paper_claim_confirmation = revealSign(<h(paper(~paper)), ~id>, ~pc_privk)
+  in
+    [!PC($PC, ~pc_privk),
+     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
+     Waiting_For_Paper_Claim(~paper),
+     Log_In(signed_paper_claim)]
+  --[PublicLog(<'Decision_3_2', signed_paper_claim_confirmation>),
+     PaperClaimConfirmed(paper(~paper), ~id, ~r_id, ~S_privk)]->
+    [Log_Out(signed_paper_claim_confirmation)]
 
 /*
 -------------------------------------------------------------------------------
@@ -917,6 +955,44 @@ lemma paper_rejected_submitter_verifiability_soundness_2_true_no_adversary:
   f < g &
   g < h &
   h < i
+"
+
+/*
+=============
+Sanity lemmas
+=============
+*/
+
+lemma sanity_one:
+exists-trace
+"Ex S_privk PC_privk R p r1  R_key R_privk b g_k r2 s_id r_id
+    #h #i #j #k #l #m #n #o #p #q #r #s.
+    ReviewerSetup(R, R_key, R_privk) @h
+    & SubmittedPaper(S_privk, p) @i
+    & SubmittedPaperWithID(s_id, r_id) @i
+    & PCReceivedPaper(PC_privk, commit(p,r1)) @j
+    & PCSendsPaperToReviewer(R, p) @k
+    & BidOnPaper(R, R_privk, R_key, b, p) @l
+    & MatchedPaper(p, R, g_k) @m
+    & ReviewedPaper(R, p) @n
+    & DiscussedPaper(R, p) @o
+    & PCReceivedDiscussionFromReviewer(R, p, g_k) @p
+    & PaperAccepted(commit(p,r2)) @q
+    & BindReviewer(R, R_key, R_privk) @q
+    & PaperClaimed(p, s_id, r_id, S_privk) @r
+    & PaperClaimConfirmed(p, s_id, r_id, S_privk) @s
+"
+
+lemma sanity_only_paper_accepted:
+exists-trace
+"Ex p r #r.
+   PaperAccepted(commit(p,r)) @r
+"
+
+lemma sanity_only_paper_rejected:
+exists-trace
+"Ex p r #r.
+   PaperRejected(commit(p,r)) @r
 "
 
 
