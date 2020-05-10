@@ -12,6 +12,11 @@ for line in lines:
     num = line.split(':')[0]
     if 'pc_privk' in line:
         p[0].append(num)
+    elif 'review_authenticity' in lemma:
+        if 'reviewer_privk' in line:
+            p[1].append(num)
+        elif 'privk' in line:
+            p[2].append(num)
     else:
         p[3].append(num)
 
