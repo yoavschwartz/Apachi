@@ -10,8 +10,8 @@ begin
 
 builtins: hashing, asymmetric-encryption, symmetric-encryption
 functions: commit/2, commitRelationProof/2, checkCommitRelationProof/3, makeDiscussion/1, makeGrade/1,
-           makeReview/2, paper/1, randomness/1, id/1, gradeProof/2, checkGradeProof/3,
-           revealSign/2 [private], getMessage/1
+           makeReview/2, paper/1 [private], randomness/1 [private], id/1 [private], gradeProof/2, checkGradeProof/3,
+           revealSign/2 [private], getMessage/1, nonce/1 [private]
 equations: getMessage(revealSign(m, privk)) = m
 
 
@@ -19,6 +19,26 @@ rule Generate_revealing_signature:
     [In(m), In(~sk)]
   --[KSign(revealSign(m, ~sk))]->
     [Out(revealSign(m, ~sk))]
+
+rule Generate_paper:
+    [Fr(~p)]
+  --[]->
+    [Out(paper(~p))]
+
+rule Generate_randomness:
+    [Fr(~r)]
+  --[]->
+    [Out(randomness(~r))]
+
+rule Generate_id:
+    [Fr(~id)]
+  --[]->
+    [Out(id(~id))]
+
+rule Generate_nonce:
+    [Fr(~nonce)]
+  --[]->
+    [Out(nonce(~nonce))]
 
 
 /*
@@ -50,8 +70,8 @@ rule PublicLog_out:
 Setup actors
 */
 
-rule Setup: 
-    let 
+rule Setup:
+    let
     pc_pubk = pk(~pc_privk)
     in
     [Fr(~pc_privk)]
@@ -76,7 +96,7 @@ rule Setup_submitter:
 rule Setup_pc:
     [Setup_PC($PC, ~pc_privk)]
   --[OnlyOnceWith('Setup_PC')]->
-    [!PC($PC, ~pc_privk), 
+    [!PC($PC, ~pc_privk),
      Out(pk(~pc_privk))]
 
 rule Setup_reviewer:
@@ -142,14 +162,16 @@ rule Submission_1_submitter_submits:
      PublicLog(<'Submission_1', signed_identity_commit>),
      KeySecret(~submitter_key),
      KeySecret(~submitter_privk),
-	 SymmetricKey(~submitter_key),
+	   SymmetricKey(~submitter_key),
      PrivateKey(~submitter_privk),
-     SubmitterPrivateKey(~submitter_privk)]->
+     SubmitterPrivateKey(~submitter_privk),
+     Randomness(randomness(~r_submit)),
+     Randomness(randomness(~r_review))]->
     [Log_Out(signed_paper_commit),
      Log_Out(signed_submission),
      Log_Out(signed_submission_key),
      Log_Out(signed_identity_commit),
-     Waiting_For_Feedback(~id, pk(~pc_privk), ~submitter_privk, ~submitter_key, ~paper, ~r_review, ~r_id),
+     Waiting_For_Feedback(~id, pk(~pc_privk), ~submitter_privk, ~submitter_key, ~paper, ~r_review, ~r_submit, ~r_id),
      Reveal_Key_Other(~submitter_key),
      Reveal_Key_Other(~submitter_privk),
      Out(pk(~submitter_privk))]
@@ -174,9 +196,11 @@ rule Submission_2_pc_receives_submission:
   --[PCReceivedPaper(~pc_privk, paper_commit),
      PublicLog(<'Submission_2', signed_paper_commit>),
      OnlyOnceWith(<'Submission_2', ~paper>),
-	 KeySecret(~group_key),
-	 SymmetricKey(~group_key)]->
-    [!Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit), 
+     KeySecret(~group_key),
+     SymmetricKey(~group_key),
+     SymmetricKey(~submitter_key),
+     SubmitterKeyReceived(~submitter_key)]->
+    [!Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
      Log_Out(signed_paper_commit),
      !Group_For_Paper(paper(~paper), ~group_key, ~r_grade),
      Reveal_Key_PC(~group_key),
@@ -194,7 +218,7 @@ rule Matching_1_pc_sends_paper:
   let
     encrypted_paper = revealSign(senc(paper(~paper), ~reviewer_key), ~pc_privk)
   in
-    [!PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)), 
+    [!PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
      !PC($PC, ~pc_privk)]
   --[OnlyOnceWith(<'Matching_1', $Reviewer, ~paper>),
@@ -260,21 +284,25 @@ rule Reviewing_1_reviewer_sends_review:
   	matching = revealSign(<review_paper_commit, pk(~reviewer_privk)>, ~pc_privk)
   	matching_secret = revealSign(senc(<paper(~paper), ~group_key, randomness(~r_grade), randomness(~r_review)>, ~reviewer_key), ~pc_privk)
 
-    review = makeReview(paper(~paper), $Reviewer)
+    review = makeReview(paper(~paper), nonce(~review_nonce))
   	group_message = senc(revealSign(review, ~reviewer_privk), ~group_key)
   	commit_paper_reviewed = revealSign(<review_paper_commit, 'reviewed'>, ~reviewer_privk)
   in
     [!Reviewer_Bid_On_Paper($Reviewer, paper(~paper)),
      !Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pk(~pc_privk)),
      Log_In(matching),
-     Log_In(matching_secret)]
+     Log_In(matching_secret),
+     Fr(~review_nonce)]
   --[ReviewedPaper($Reviewer, paper(~paper)),
      MadeReview(~reviewer_privk, paper(~paper)),
      SecretReview(review),
+     SecretNonce(nonce(~review_nonce)),
      OnlyOnceWith(<'Reviewing_1', $Reviewer, ~paper>),
      PublicLog(<'Reviewing_1', group_message>),
      PublicLog(<'Reviewing_1', commit_paper_reviewed>),
-     NotEq(~pc_privk, ~group_key)]->
+     NotEq(~pc_privk, ~group_key),
+     SymmetricKey(~group_key),
+     Randomness(randomness(~r_review))]->
     [!Reviewer_Reviewed_Paper($Reviewer, paper(~paper), randomness(~r_review), randomness(~r_grade), ~group_key),
      Start_Discussing($Reviewer, paper(~paper)),
      Log_Out(group_message),
@@ -335,10 +363,10 @@ rule Decision_1_pc_receives_discussion_and_grade:
     grade = makeGrade(paper(~paper))
     encrypted_discussion = senc(revealSign(discussion, ~reviewer_privk), ~group_key)
     encrypted_conclusion = senc(revealSign(grade, ~reviewer_privk), ~group_key)
-    group_message = senc(revealSign(makeReview(paper(~paper), $Reviewer), ~reviewer_privk), ~group_key)
+    group_message = senc(revealSign(makeReview(paper(~paper), nonce(~review_nonce)), ~reviewer_privk), ~group_key)
     commit_paper_discussed = revealSign(<commit(paper(~paper), randomness(~r_review)), 'discussed'>, ~reviewer_privk)
 
-    submitter_response = senc(<grade, revealSign(makeReview(paper(~paper), $Reviewer), ~reviewer_privk)>, ~submitter_key)
+    submitter_response = revealSign(senc(<grade, revealSign(makeReview(paper(~paper), nonce(~review_nonce)), ~reviewer_privk)>, ~submitter_key), ~pc_privk)
   in
     [!PC($PC, ~pc_privk),
      PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key),
@@ -390,45 +418,45 @@ rule Decision_2_2_pc_paper_rejected:
 
 
 /*
-Phase 6: Feedback
+Phase 6: Claim
 1. Submitter receives feedback from log
 2. Submitter claims paper
 3. PC confirms paper ownership
 */
 
-rule Feedback_1_submitter_receives_feedback:
+rule Claim_1_submitter_receives_feedback:
   let
     discussion = makeDiscussion(paper(~paper))
     grade = makeGrade(paper(~paper))
-    submitter_response = senc(<grade, revealSign(makeReview(paper(~paper), $Reviewer), ~reviewer_privk)>, ~submitter_key)
+    submitter_response = revealSign(senc(<grade, revealSign(makeReview(paper(~paper), nonce(~review_nonce)), ~reviewer_privk)>, ~submitter_key), ~pc_privk)
     review_paper_commit = commit(paper(~paper), randomness(~r_review))
     matching = revealSign(<review_paper_commit, pk(~reviewer_privk)>, ~pc_privk)
   in
     [Log_In(submitter_response),
      Log_In(matching),
-     Waiting_For_Feedback(~id, pk(~pc_privk), ~submitter_privk, ~submitter_key, ~paper, ~r_review, ~r_id)]
+     Waiting_For_Feedback(~id, pk(~pc_privk), ~submitter_privk, ~submitter_key, ~paper, ~r_review, ~r_submit, ~r_id)]
   --[ReceivedFeedback(paper(~paper), ~reviewer_privk, ~pc_privk)]->
-    [Submitter_Ready_For_Acceptance(~id, pk(~pc_privk), ~submitter_privk, ~submitter_key, ~paper, ~r_review, ~r_id)]
+    [Submitter_Ready_For_Acceptance(~id, pk(~pc_privk), ~submitter_privk, ~submitter_key, ~paper, ~r_review, ~r_submit, ~r_id)]
 
-rule Feedback_2_submitter_claims_paper:
+rule Claim_2_submitter_claims_paper:
   let
     accepted = <paper(~paper), randomness(~r_submit), randomness(~r_review)>
     accepted_out = revealSign(accepted, ~pc_privk)
 
-    signed_paper_claim = revealSign(<id(~id), randomness(~r_id)>, ~submitter_privk)
+    signed_paper_claim = revealSign(<paper(~paper), id(~id), randomness(~r_id)>, ~submitter_privk)
   in
     [Log_In(accepted_out),
-    Submitter_Ready_For_Acceptance(~id, pk(~pc_privk), ~submitter_privk, ~submitter_key, ~paper, ~r_review, ~r_id)]
+    Submitter_Ready_For_Acceptance(~id, pk(~pc_privk), ~submitter_privk, ~submitter_key, ~paper, ~r_review, ~r_submit, ~r_id)]
   --[PublicLog(<'Feedback_2', signed_paper_claim>),
      PaperClaimed(paper(~paper), id(~id), randomness(~r_id))]->
     [Log_Out(signed_paper_claim)]
 
-rule Feedback_3_PC_confirms_paper_ownership:
+rule Claim_3_PC_confirms_paper_ownership:
   let
-    signed_paper_claim = revealSign(<id(~id), randomness(~r_id)>, ~submitter_privk)
+    signed_paper_claim = revealSign(<paper(~paper), id(~id), randomness(~r_id)>, ~submitter_privk)
     signed_identity_commit = revealSign(commit(id(~id), randomness(~r_id)), ~submitter_privk)
 
-    signed_paper_claim_confirmation = revealSign(<paper(~paper), id(~id)>, ~pc_privk)
+    signed_paper_claim_confirmation = revealSign(<paper(~paper), id(~id), randomness(~r_id)>, ~pc_privk)
   in
     [!PC($PC, ~pc_privk),
      !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
@@ -447,13 +475,28 @@ rule Feedback_3_PC_confirms_paper_ownership:
 -------------------------------------------------------------------------------
 */
 
-lemma helper_signature_requires_privk [reuse]:
-"All privk m #i #j.
-  PrivateKey(privk) @i &
-  KSign(revealSign(m, privk)) @j
+lemma helper_pc_signature_requires_pc_privk [reuse]:
+"All pc_privk m #i #j.
+  PCPrivk(pc_privk) @i &
+  KSign(revealSign(m, pc_privk)) @j
 ==>
-  Ex #k.
-    KeyRevealed(privk) @k
+  Ex #k. KeyRevealedPC(pc_privk) @k
+"
+
+lemma helper_paper_claimed_requires_accepted [reuse]:
+"All r_review p id r_id #i #j.
+  PaperClaimed(p, id, r_id) @i &
+  PaperRejected(commit(p, r_review)) @j
+==>
+  Ex k #k. KeyRevealed(k) @k
+"
+
+lemma helper_paper_claim_confirmed_requires_accepted [reuse]:
+"All r_review p id r_id #i #j.
+  PaperClaimConfirmed(p, id, r_id) @i &
+  PaperRejected(commit(p, r_review)) @j
+==>
+  F
 "
 
 /*
@@ -466,51 +509,44 @@ lemma key_secret:
 all-traces
 "All k1 #i #j.
   KeySecret(k1) @i &
-  K(k1) @j
+  KU(k1) @j
 ==>
   Ex k2 #k.
     KeyRevealed(k2) @k & #k < #j
 "
 
-lemma paper_secrecy_accepted:
+lemma paper_secrecy_accepted [reuse]:
 "All s_privk p #i #j.
   SubmittedPaper(s_privk, p) @i &
-  K(p) @j &
+  KU(p) @j &
   not(Ex k #k. KeyRevealed(k) @k)
 ==>
   Ex r #k.
     PaperAccepted(commit(p, r)) @k & k < j
 "
 
-lemma paper_secrecy_rejected:
+lemma paper_secrecy_rejected [reuse]:
 "All s_privk p r #i #j #k.
   SubmittedPaper(s_privk, p) @i &
   PaperRejected(commit(p, r)) @j &
-  K(p) @k
+  KU(p) @k
 ==>
  Ex k #k.
    KeyRevealed(k) @k
 "
 
-lemma review_randomness_secrecy:
-"All p r_review r_submit s_key s_privk #i #k.
-  K(r_review) @i &
-  SubmitterKnowledge(p, s_privk, r_submit, r_review, s_key) @k
-==>
- (Ex k #a.
-   KeyRevealed(k) @a) |
- (Ex #a.
-   PaperAccepted(commit(p, r_review)) @a & a < i)
+lemma nonce_secrecy [reuse]:
+all-traces
+"not(Ex n #i #j. KU(n) @i & SecretNonce(n) @j)
 "
 
 lemma review_secrecy:
-"All R s_privk p #i #j #k.
-  SubmittedPaper(s_privk, p) @i &
-  SecretReview(makeReview(p, R)) @j &
-  K(makeReview(p, R)) @k
+"All p n #i #j.
+  SecretReview(makeReview(p, n)) @i &
+  KU(makeReview(p, n)) @j
 ==>
   (Ex k #a. KeyRevealed(k) @a) |
-  (Ex r #a. PaperAccepted(commit(p, r)) @a & a < k)
+  (Ex s_key #a #b. SubmitterKeyReceived(s_key) @a & KU(s_key) @b)
 "
 
 
@@ -522,22 +558,29 @@ Authenticity
 
 lemma acceptance_authenticity:
 "All p r_submit r_review pc_privk #i #j.
-   K(revealSign(<paper(p), r_submit, r_review>, pc_privk)) @i &
-   PCPrivk(pc_privk) @j
+   KU(revealSign(<p, r_submit, r_review>, pc_privk)) @i &
+   PCReceivedPaper(pc_privk, commit(p, r_submit)) @j
 ==>
   (Ex #a. KeyRevealedPC(pc_privk) @a) |
-  (Ex #a. PaperAccepted(commit(paper(p), r_review)) @a)
+  (Ex #a. PaperAccepted(commit(p, r_review)) @a)
 "
 
 lemma rejection_authenticity:
 "All p r_review r_grade grade pc_privk #i #j.
-   K(revealSign(<commit(p, r_review), r_grade, grade>, pc_privk)) @i &
+   KU(revealSign(<commit(p, r_review), r_grade, grade>, pc_privk)) @i &
    PCPrivk(pc_privk) @j
 ==>
   (Ex #a. KeyRevealedPC(pc_privk) @a) |
   (Ex #a. PaperRejected(commit(p, r_review)) @a)
 "
 
+lemma review_authenticity:
+"All p r_privk pc_privk #i.
+   ReceivedFeedback(p, r_privk, pc_privk) @i
+==>
+  (Ex #a. MadeReview(r_privk, p) @a) |
+  (Ex #a. KU(r_privk) @a)
+"
 
 /*
 =======================
@@ -548,21 +591,21 @@ Universal Verifiability
 //-------Paper accepted--------------------------------------------------------
 
 lemma paper_accepted_verifiabillity_completeness:
-"All R R2 id r_id r_privk r_key g_k p bid r_review r_submit pc_privk grade grade_commit
+"All R R2 id r_id r_privk r_key g_k p bid r_grade r_review r_submit pc_privk grade
      #a #b #c #d #e #f #g #h #i #j.
 
   // Goal convergent
-  PCReceivedPaper(pc_privk, commit(p, r_submit)) @a &
-  PCSendsPaperToReviewer(R, p) @b &
-  BidOnPaper(R, r_privk, r_key, bid, p) @c &
-  MatchedPaper(p, R, g_k) @d &
-  ReviewedPaper(R, p) @e &
-  DiscussedPaper(R, p) @f &
-  GradeGiven(R, p, grade, grade_commit) @f &
-  PCReceivedDiscussionFromReviewer(R2, p, g_k) @g &
-  PaperAccepted(commit(p, r_review)) @h &
-  PaperClaimed(p, id, r_id) @i &
-  PaperClaimConfirmed(p, id, r_id) @j &
+  PCReceivedPaper(pc_privk, commit(paper(p), r_submit)) @a &
+  PCSendsPaperToReviewer(R, paper(p)) @b &
+  BidOnPaper(R, r_privk, r_key, bid, paper(p)) @c &
+  MatchedPaper(paper(p), R, g_k) @d &
+  ReviewedPaper(R, paper(p)) @e &
+  DiscussedPaper(R, paper(p)) @f &
+  GradeGiven(R, paper(p), grade, commit(grade, r_grade)) @f &
+  PCReceivedDiscussionFromReviewer(R2, paper(p), g_k) @g &
+  PaperAccepted(commit(paper(p), r_review)) @h &
+  PaperClaimed(paper(p), id(id), r_id) @i &
+  PaperClaimConfirmed(paper(p), id(id), r_id) @j &
 
   a < b &
   b < d &
@@ -581,98 +624,100 @@ lemma paper_accepted_verifiabillity_completeness:
 ==>
 
   // Verifiability test is true
-  (Ex s_privk #k #l #m #n #o #p #q #r.
-
-    // Paper submit commit log made by Submitter
-    PublicLog(<'Submission_1', revealSign(commit(p, r_submit), s_privk)>) @k &
-
-    // Submitter identity commit log made by Submitter
-    PublicLog(<'Submission_1', revealSign(commit(id, r_id), s_privk)>) @k &
-
-    // Paper submit commit log made by PC
-    PublicLog(<'Submission_2', revealSign(commit(p, r_submit), pc_privk)>) @l &
-
-    // Paper matching log made by PC
-    PublicLog(<'Matching_3', revealSign(<commit(p, r_review), pk(r_privk)>, pc_privk)>) @m &
-
-    // Paper review commit log made by Reviewer
-    PublicLog(<'Reviewing_1', revealSign(<commit(p, r_review), 'reviewed'>, r_privk)>) @n &
-
-    // Paper discussion commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSign(<commit(p, r_review), 'discussed'>, r_privk)>) @o &
-
-    // Paper grade commit log made by Reviewer
-    PublicLog(<'Discussion_1_2', revealSign(grade_commit, r_privk)>) @o &
-
-    // Grade reveal log made by PC
-    PublicLog(<'Decision_2_1', revealSign(grade, pc_privk)>) @p &
-
-    // Grade proof log made by PC (this is modelled as a one to one proof, but the protocol has a many to many proof instead)
-    PublicLog(<'Decision_2_1', revealSign(gradeProof(grade, grade_commit), pc_privk)>) @p &
-
-    // Paper acceptance log made by PC
-    PublicLog(<'Decision_2_1', revealSign(<p, r_submit, r_review>, pc_privk)>) @p &
-
-    // Paper claim log made by Submitter
-    PublicLog(<'Feedback_2', revealSign(<id, r_id>, s_privk)>) @q &
-
-    // Paper ownership confirmation log made by PC
-    PublicLog(<'Feedback_3', revealSign(<p, id>, pc_privk)>) @r &
-
-    // Making sure that things happen in right order
-    #k < #l &
-    #l < #m &
-    #m < #n &
-    #n < #o &
-    #o < #p &
-    #p < #q &
-    #q < #r
-  )
-"
-
-lemma paper_accepted_verifiability_soundness_2_true_no_adversary:
-"All p r_submit r_review r_privk s_privk pc_privk grade grade_commit id r_id
-     #k #l #m #n #o #p #q #r.
-
-  // Verifiability test is true
+  (Ex s_privk #j #k #l #m #n #o #p #q #r.
 
   // Paper submit commit log made by Submitter
-  PublicLog(<'Submission_1', revealSign(commit(p, r_submit), s_privk)>) @k &
+  PublicLog(<'Submission_1', revealSign(commit(paper(p), r_submit), s_privk)>) @j &
 
   // Submitter identity commit log made by Submitter
-  PublicLog(<'Submission_1', revealSign(commit(id, r_id), s_privk)>) @k &
+  PublicLog(<'Submission_1', revealSign(commit(id(id), r_id), s_privk)>) @k &
 
   // Paper submit commit log made by PC
-  PublicLog(<'Submission_2', revealSign(commit(p, r_submit), pc_privk)>) @l &
+  PublicLog(<'Submission_2', revealSign(commit(paper(p), r_submit), pc_privk)>) @l &
 
   // Paper matching log made by PC
-  PublicLog(<'Matching_3', revealSign(<commit(p, r_review), pk(r_privk)>, pc_privk)>) @m &
+  PublicLog(<'Matching_3', revealSign(<commit(paper(p), r_review), pk(r_privk)>, pc_privk)>) @m &
 
   // Paper review commit log made by Reviewer
-  PublicLog(<'Reviewing_1', revealSign(<commit(p, r_review), 'reviewed'>, r_privk)>) @n &
+  PublicLog(<'Reviewing_1', revealSign(<commit(paper(p), r_review), 'reviewed'>, r_privk)>) @n &
 
   // Paper discussion commit log made by Reviewer
-  PublicLog(<'Discussion_1_2', revealSign(<commit(p, r_review), 'discussed'>, r_privk)>) @o &
+  PublicLog(<'Discussion_1_2', revealSign(<commit(paper(p), r_review), 'discussed'>, r_privk)>) @o &
 
   // Paper grade commit log made by Reviewer
-  PublicLog(<'Discussion_1_2', revealSign(grade_commit, r_privk)>) @o &
+  PublicLog(<'Discussion_1_2', revealSign(commit(grade, r_grade), r_privk)>) @o &
 
   // Grade reveal log made by PC
   PublicLog(<'Decision_2_1', revealSign(grade, pc_privk)>) @p &
 
   // Grade proof log made by PC (this is modelled as a one to one proof, but the protocol has a many to many proof instead)
-  PublicLog(<'Decision_2_1', revealSign(gradeProof(grade, grade_commit), pc_privk)>) @p &
+  PublicLog(<'Decision_2_1', revealSign(gradeProof(grade, commit(grade, r_grade)), pc_privk)>) @p &
 
   // Paper acceptance log made by PC
-  PublicLog(<'Decision_2_1', revealSign(<p, r_submit, r_review>, pc_privk)>) @p &
+  PublicLog(<'Decision_2_1', revealSign(<paper(p), r_submit, r_review>, pc_privk)>) @p &
 
   // Paper claim log made by Submitter
-  PublicLog(<'Feedback_2', revealSign(<id, r_id>, s_privk)>) @q &
+  PublicLog(<'Feedback_2', revealSign(<paper(p), id(id), r_id>, s_privk)>) @q &
 
   // Paper ownership confirmation log made by PC
-  PublicLog(<'Feedback_3', revealSign(<p, id>, pc_privk)>) @r &
+  PublicLog(<'Feedback_3', revealSign(<paper(p), id(id), r_id>, pc_privk)>) @r &
 
   // Making sure that things happen in right order
+  #j < #l &
+  #k < #l &
+  #l < #m &
+  #m < #n &
+  #n < #o &
+  #o < #p &
+  #p < #q &
+  #q < #r
+  )
+"
+
+lemma paper_accepted_verifiability_soundness_2_true_no_adversary:
+"All p r_submit r_review r_privk s_privk pc_privk grade r_grade id r_id
+     #j #k #l #m #n #o #p #q #r.
+
+  // Verifiability test is true
+
+  // Paper submit commit log made by Submitter
+  PublicLog(<'Submission_1', revealSign(commit(paper(p), r_submit), s_privk)>) @j &
+
+  // Submitter identity commit log made by Submitter
+  PublicLog(<'Submission_1', revealSign(commit(id(id), r_id), s_privk)>) @k &
+
+  // Paper submit commit log made by PC
+  PublicLog(<'Submission_2', revealSign(commit(paper(p), r_submit), pc_privk)>) @l &
+
+  // Paper matching log made by PC
+  PublicLog(<'Matching_3', revealSign(<commit(paper(p), r_review), pk(r_privk)>, pc_privk)>) @m &
+
+  // Paper review commit log made by Reviewer
+  PublicLog(<'Reviewing_1', revealSign(<commit(paper(p), r_review), 'reviewed'>, r_privk)>) @n &
+
+  // Paper discussion commit log made by Reviewer
+  PublicLog(<'Discussion_1_2', revealSign(<commit(paper(p), r_review), 'discussed'>, r_privk)>) @o &
+
+  // Paper grade commit log made by Reviewer
+  PublicLog(<'Discussion_1_2', revealSign(commit(grade, r_grade), r_privk)>) @o &
+
+  // Grade reveal log made by PC
+  PublicLog(<'Decision_2_1', revealSign(grade, pc_privk)>) @p &
+
+  // Grade proof log made by PC (this is modelled as a one to one proof, but the protocol has a many to many proof instead)
+  PublicLog(<'Decision_2_1', revealSign(gradeProof(grade, commit(grade, r_grade)), pc_privk)>) @p &
+
+  // Paper acceptance log made by PC
+  PublicLog(<'Decision_2_1', revealSign(<paper(p), r_submit, r_review>, pc_privk)>) @p &
+
+  // Paper claim log made by Submitter
+  PublicLog(<'Feedback_2', revealSign(<paper(p), id(id), r_id>, s_privk)>) @q &
+
+  // Paper ownership confirmation log made by PC
+  PublicLog(<'Feedback_3', revealSign(<paper(p), id(id), r_id>, pc_privk)>) @r &
+
+  // Making sure that things happen in right order
+  #j < #l &
   #k < #l &
   #l < #m &
   #m < #n &
@@ -686,17 +731,17 @@ lemma paper_accepted_verifiability_soundness_2_true_no_adversary:
   Ex R2 R bid r_key g_k #a #b #c #d #e #f #g #h #i #j.
 
   // Goal convergent
-  PCReceivedPaper(pc_privk, commit(p, r_submit)) @a &
-  PCSendsPaperToReviewer(R, p) @b &
-  BidOnPaper(R, r_privk, r_key, bid, p) @c &
-  MatchedPaper(p, R, g_k) @d &
-  ReviewedPaper(R, p) @e &
-  DiscussedPaper(R, p) @f &
-  GradeGiven(R, p, grade, grade_commit) @f &
-  PCReceivedDiscussionFromReviewer(R2, p, g_k) @g &
-  PaperAccepted(commit(p, r_review)) @h &
-  PaperClaimed(p, id, r_id) @i &
-  PaperClaimConfirmed(p, id, r_id) @j &
+  PCReceivedPaper(pc_privk, commit(paper(p), r_submit)) @a &
+  PCSendsPaperToReviewer(R, paper(p)) @b &
+  BidOnPaper(R, r_privk, r_key, bid, paper(p)) @c &
+  MatchedPaper(paper(p), R, g_k) @d &
+  ReviewedPaper(R, paper(p)) @e &
+  DiscussedPaper(R, paper(p)) @f &
+  GradeGiven(R, paper(p), grade, commit(grade, r_grade)) @f &
+  PCReceivedDiscussionFromReviewer(R2, paper(p), g_k) @g &
+  PaperAccepted(commit(paper(p), r_review)) @h &
+  PaperClaimed(paper(p), id(id), r_id) @i &
+  PaperClaimConfirmed(paper(p), id(id), r_id) @j &
 
   a < b &
   b < d &
@@ -1017,6 +1062,8 @@ exists-trace
     & BindReviewer(R, R_key, R_privk) @q
     & PaperClaimed(p, s_id, r_id) @r
     & PaperClaimConfirmed(p, s_id, r_id) @s
+    & not(Ex #a. AdversaryIn() @a)
+    & not(Ex #a. AdversaryOut() @a)
 "
 
 lemma sanity_only_paper_accepted:
@@ -1046,5 +1093,8 @@ restriction OnlyOnceWith:
 
 restriction TypeSymmetricKeys:
 "All m k #i #j. SymmetricKey(k) @i & KSign(revealSign(m, k)) @j ==> F"
+
+restriction UniqueLog:
+"All m #i #j. PublicLog(m) @i & PublicLog(m) @j ==> #i = #j"
 
 end
