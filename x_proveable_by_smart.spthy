@@ -90,6 +90,7 @@ rule Setup_reviewer:
      OnlyOnceWith(<'Setup_Reviewer', $Reviewer>),
      KeySecret(~reviewer_key),
      KeySecret(~reviewer_privk),
+	 SymmetricKey(~reviewer_key),
      PrivateKey(~reviewer_privk)]->
     [!PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      !Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pc_pubk),
@@ -141,6 +142,7 @@ rule Submission_1_submitter_submits:
      PublicLog(<'Submission_1', signed_identity_commit>),
      KeySecret(~submitter_key),
      KeySecret(~submitter_privk),
+	 SymmetricKey(~submitter_key),
      PrivateKey(~submitter_privk),
      SubmitterPrivateKey(~submitter_privk)]->
     [Log_Out(signed_paper_commit),
@@ -171,7 +173,9 @@ rule Submission_2_pc_receives_submission:
      Log_In(signed_identity_commit)]
   --[PCReceivedPaper(~pc_privk, paper_commit),
      PublicLog(<'Submission_2', signed_paper_commit>),
-     OnlyOnceWith(<'Submission_2', ~paper>)]->
+     OnlyOnceWith(<'Submission_2', ~paper>),
+	 KeySecret(~group_key),
+	 SymmetricKey(~group_key)]->
     [!Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit), 
      Log_Out(signed_paper_commit),
      !Group_For_Paper(paper(~paper), ~group_key, ~r_grade),
@@ -1039,5 +1043,8 @@ restriction NotEq:
 
 restriction OnlyOnceWith:
 "All x #i #j. OnlyOnceWith(x) @i & OnlyOnceWith(x) @j ==> #i = #j"
+
+restriction TypeSymmetricKeys:
+"All m k #i #j. SymmetricKey(k) @i & KSign(revealSign(m, k)) @j ==> F"
 
 end
