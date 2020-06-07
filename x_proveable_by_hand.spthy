@@ -55,9 +55,14 @@ rule Log_in:
   --[]->
     [Log_In(m)]
 
-rule PublicLog_in:
+rule PublicLog_in_1:
     [In(m)]
   --[AdversaryIn(), PublicLog(<'Submission_1', m>)]->
+    [!On_Log(m)]
+
+rule PublicLog_in_2:
+    [In(m)]
+  --[AdversaryIn(), PublicLog(<'Claim_2', m>)]->
     [!On_Log(m)]
 
 rule PublicLog_out:
@@ -447,7 +452,7 @@ rule Claim_2_submitter_claims_paper:
   in
     [Log_In(accepted_out),
     Submitter_Ready_For_Acceptance(~id, pk(~pc_privk), ~submitter_privk, ~submitter_key, ~paper, ~r_review, ~r_submit, ~r_id)]
-  --[PublicLog(<'Feedback_2', signed_paper_claim>),
+  --[PublicLog(<'Claim_2', signed_paper_claim>),
      PaperClaimed(paper(~paper), id(~id), randomness(~r_id))]->
     [Log_Out(signed_paper_claim)]
 
@@ -462,7 +467,7 @@ rule Claim_3_PC_confirms_paper_ownership:
      !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
      Waiting_For_Paper_Claim(~paper),
      Log_In(signed_paper_claim)]
-  --[PublicLog(<'Feedback_3', signed_paper_claim_confirmation>),
+  --[PublicLog(<'Claim_3', signed_paper_claim_confirmation>),
      PaperClaimConfirmed(paper(~paper), id(~id), randomness(~r_id))]->
     [Log_Out(signed_paper_claim_confirmation)]
 
@@ -529,10 +534,10 @@ exists-trace
     PublicLog(<'Decision_2_1', revealSign(<paper(p), r_submit, r_review>, pc_privk)>) @p &
 
     // Paper claim log made by Submitter
-    PublicLog(<'Feedback_2', revealSign(<paper(p), id(id), r_id>, s_privk)>) @q &
+    PublicLog(<'Claim_2', revealSign(<paper(p), id(id), r_id>, s_privk)>) @q &
 
     // Paper ownership confirmation log made by PC
-    PublicLog(<'Feedback_3', revealSign(<paper(p), id(id), r_id>, pc_privk)>) @r &
+    PublicLog(<'Claim_3', revealSign(<paper(p), id(id), r_id>, pc_privk)>) @r &
 
     // Making sure that things happen in right order
     #j < #l &
@@ -719,10 +724,10 @@ exists-trace
     PublicLog(<'Decision_2_1', revealSign(<paper(p), r_submit, r_review>, pc_privk)>) @p &
 
     // Paper claim log made by Submitter
-    PublicLog(<'Feedback_2', revealSign(<paper(p), id(id), r_id>, s_privk)>) @q &
+    PublicLog(<'Claim_2', revealSign(<paper(p), id(id), r_id>, s_privk)>) @q &
 
     // Paper ownership confirmation log made by PC
-    PublicLog(<'Feedback_3', revealSign(<paper(p), id(id), r_id>, pc_privk)>) @r &
+    PublicLog(<'Claim_3', revealSign(<paper(p), id(id), r_id>, pc_privk)>) @r &
 
     // Making sure that things happen in right order
     #j < #l &
