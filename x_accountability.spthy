@@ -1,4 +1,4 @@
-theory x_v2_proveable_by_smart
+theory x_accountability
 begin
 
 /*
@@ -9,8 +9,8 @@ begin
  */
 
 builtins: hashing, asymmetric-encryption, symmetric-encryption
-functions: commit/2, commitRelationProof/2, checkCommitRelationProof/3, makeDiscussion/1, makeGrade/1,
-           makeReview/2, paper/1 [private], randomness/1 [private], id/1 [private], gradeProof/2, checkGradeProof/3,
+functions: commit/2, commitRelationProof/2, makeDiscussion/1, makeGrade/1, makeReview/2,
+           paper/1 [private], randomness/1 [private], randomnessGrade/1 [private], id/1 [private], gradeProof/2,
            revealSign/2 [private], getMessage/1, nonce/1 [private]
 equations: getMessage(revealSign(m, privk)) = m
 
@@ -40,11 +40,6 @@ rule Generate_nonce:
   --[]->
     [Out(nonce(~nonce))]
 
-rule Generate_key:
-    [Fr(~key)]
-  --[]->
-    [Out(~key)]
-
 
 /*
 Create a log which an adversary can use
@@ -60,12 +55,12 @@ rule Log_in:
   --[]->
     [Log_In(m)]
 
-rule PublicLog_in:
+rule Adversary_Log_in:
     [In(m)]
   --[AdversaryIn(), PublicLog(m)]->
     [!On_Log(m)]
 
-rule PublicLog_out:
+rule Adversary_Log_out:
     [!On_Log(m)]
   --[AdversaryOut()]->
     [Out(m)]
@@ -104,6 +99,7 @@ rule Setup_reviewer:
   --[ReviewerSetup(~reviewer_key, ~reviewer_privk),
      OnlyOnceWith(<'Setup_Reviewer', $Reviewer>),
 	   SymmetricKey(~reviewer_key),
+	   ReviewerKey(~reviewer_key),
      ReviewerPrivateKey(~reviewer_privk)]->
     [!PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      Out(~reviewer_key),
@@ -148,10 +144,14 @@ rule Submission_2_pc_receives_submission:
      OnlyOnceWith(<'Submission_2', ~paper>),
      SymmetricKey(~group_key),
      SymmetricKey(~submitter_key),
+     SubmitterKey(~submitter_key),
+     RGrade(~r_grade),
+     RSubmit(~r_submit),
+     RReview(~r_review),
+     GroupKey(~group_key),
      GenerateRandomness(randomness(~r_grade)),
      SubmitterKeyReceived(~submitter_key),
-     NotEq(~r_submit, ~r_review),
-     RGrade(randomness(~r_grade))]->
+     NotEq(~r_submit, ~r_review)]->
     [!Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
      Log_Out(signed_paper_commit),
      !Group_For_Paper(paper(~paper), ~group_key, ~r_grade),
@@ -191,7 +191,7 @@ rule Matching_3_pc_matches_paper:
     commit_relation_proof = commitRelationProof(review_paper_commit, submit_paper_commit)
   in
     [!PC($PC, ~pc_privk),
-    Fr(~review_nonce),
+     Fr(~review_nonce),
      !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
      !Group_For_Paper(paper(~paper), ~group_key, ~r_grade),
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
@@ -206,6 +206,8 @@ rule Matching_3_pc_matches_paper:
      Log_Out(matching),
      Log_Out(matching_secret),
      Log_Out(commit_relation_proof)]
+
+
 /*
 Phase 3: Review
 */     
@@ -225,13 +227,13 @@ rule Review_2_pc_receives_review:
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      Log_In(encrypted_review),
      Log_In(commit_paper_reviewed)]
-  --[RandomSecret(~r_grade),
-     PCReceivedReviewFromReviewer($Reviewer, paper(~paper), ~group_key, randomness(~r_grade)),
+  --[PCReceivedReviewFromReviewer($Reviewer, paper(~paper), ~group_key, randomness(~r_grade)),
      PublicLog(encrypted_r_grade_and_group_key),
      PublicLog(group_message)]->
     [PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~review_nonce),
      Log_Out(encrypted_r_grade_and_group_key),
      Log_Out(group_message)]
+
 
 /*
 Phase 5: Decision
@@ -317,6 +319,7 @@ rule Claim_3_PC_confirms_paper_ownership:
      Waiting_For_Paper_Claim(~paper),
      Log_In(signed_paper_claim)]
   --[PublicLog(signed_paper_claim_confirmation),
+     RId(~r_id),
      PaperClaimConfirmed(paper(~paper), id(~id), randomness(~r_id))]->
     [Log_Out(signed_paper_claim_confirmation)]
 
@@ -338,23 +341,6 @@ lemma helper_randomness_is_generated [reuse]:
     GenerateRandomness(randomness(r)) @j &
     j < i
   )
-"
-
-
-/*
-=======
-Secrecy
-=======
-*/
-
-lemma key_secret:
-all-traces
-"All k #i #j.
-  KeySecret(k) @i &
-  KU(k) @j
-==>
-  Ex #k.
-    KeyRevealedPC(k) @k & #k < #j
 "
 
 
@@ -447,7 +433,7 @@ lemma paper_accepted_accountability_soundness_1_exists_trace_where_false:
 exists-trace
 "Ex p id r_id pc_privk #a #b.
 
-  //Binding the PC privk to a real PC
+  // Binding the PC privk to a real PC
   PCPrivk(pc_privk) @a &
 
   // Paper Claimed Confirmed
@@ -509,7 +495,7 @@ lemma paper_accepted_accountability_soundness_2_not_goal_adversary:
 "All p pc_privk id r_id
      #a #b.
 
-  //Binding the PC privk to a real PC
+  // Binding the PC privk to a real PC
   PCPrivk(pc_privk) @a &
 
   // Paper Claimed Confirmed
@@ -642,7 +628,7 @@ exists-trace
 "Ex r_grade grade pc_privk review_commit
      #a #b.
 
-  //Binding the PC privk to a real PC
+  // Binding the PC privk to a real PC
   PCPrivk(pc_privk) @a &
 
   // Paper rejected log made by PC
@@ -694,7 +680,7 @@ lemma paper_rejected_verifiability_soundness_2_true_no_adversary:
 "All r_grade grade pc_privk review_commit
      #a #b.
 
-  //Binding the PC privk to a real PC
+  // Binding the PC privk to a real PC
   PCPrivk(pc_privk) @a &
 
   // Paper rejected log made by PC
@@ -751,7 +737,7 @@ lemma paper_rejected_verifiability_soundness_2_true_no_adversary:
 Sanity lemmas
 =============
 */
-
+/*
 lemma sanity_one:
 exists-trace
 "Ex p s_id r_id #i.
@@ -763,7 +749,7 @@ exists-trace
 "Ex p r #r.
    PaperRejected(commit(p,r)) @r
 "
-
+*/
 
 /*
 ============
@@ -784,6 +770,24 @@ restriction UniqueLog:
 "All m #i #j. PublicLog(m) @i & PublicLog(m) @j ==> #i = #j"
 
 restriction ReviewNotSubmitter:
-"All s_privk #i #j. PCReceivedSubmissionFrom(s_privk) @i & ReviewerPrivateKey(s_privk) @j ==> F"
+"All s_privk #i #j. PCReceivedSubmissionFrom(s_privk) @i & ReviewerPrivateKey(s_privk) @j ==> Ex k #k. KeyRevealedPC(k) @k"
+
+restriction GroupKeyNotSubmitterKey:
+"All k #i #j. GroupKey(k) @i & SubmitterKey(k) @j ==> Ex k #k. KeyRevealedPC(k) @k"
+
+restriction ReviewerKeyNotSubmitterKey:
+"All k #i #j. ReviewerKey(k) @i & SubmitterKey(k) @j ==> Ex k #k. KeyRevealedPC(k) @k"
+
+restriction ReviewerPrivateKeyNotSubmitterKey:
+"All k #i #j. ReviewerPrivateKey(k) @i & SubmitterKey(k) @j ==> Ex k #k. KeyRevealedPC(k) @k"
+
+restriction RSubmitNotRGrade:
+"All r #i #j. RSubmit(r) @i & RGrade(r) @j ==> Ex k #k. KeyRevealedPC(k) @k"
+
+restriction RReviewNotRGrade:
+"All r #i #j. RReview(r) @i & RGrade(r) @j ==> Ex k #k. KeyRevealedPC(k) @k"
+
+restriction RIdNotRGrade:
+"All r #i #j. RId(r) @i & RGrade(r) @j ==> Ex k #k. KeyRevealedPC(k) @k"
 
 end
