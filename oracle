@@ -3,20 +3,29 @@
 
 import sys
 
-p = [[], [], [], [], []]
+p = [[], []]
 
 lines = sys.stdin.readlines()
 lemma = sys.argv[1]
 
 for line in lines:
     num = line.split(':')[0]
-    if 'pc_privk' in line:
-        if 'KU' in line:
+    if 'review_secrecy' in lemma:
+        if 'reviewer_review_nonce' in line:
             p[0].append(num)
-        else:
-            p[1].append(num)
-    else:
-        p[3].append(num)
+            continue
+
+    if 'review_authenticity' in lemma:
+        if 'reviewer_privk' in line:
+            p[0].append(num)
+            continue
+
+    if 'non_transferability' in lemma:
+        if 'submitter_privk' in line:
+            p[0].append(num)
+            continue
+
+    p[1].append(num)
 
 for goal in [item for sublist in p for item in sublist]:
     print(goal)

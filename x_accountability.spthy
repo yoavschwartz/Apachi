@@ -676,7 +676,7 @@ exists-trace
   )
 "
 
-lemma paper_rejected_verifiability_soundness_2_true_no_adversary:
+lemma paper_rejected_accountability_soundness_2_true_no_adversary:
 "All r_grade grade pc_privk review_commit
      #a #b.
 
