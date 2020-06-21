@@ -24,6 +24,11 @@ for line in lines:
         if 'submitter_privk' in line:
             p[0].append(num)
             continue
+            
+    if 'randomness_is_generated' in lemma:
+        if 'randomness' in line:
+            p[0].append(num)
+            continue
 
     p[1].append(num)
 

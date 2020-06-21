@@ -9,8 +9,8 @@ begin
  */
 
 builtins: hashing, asymmetric-encryption, symmetric-encryption
-functions: commit/2, commitRelationProof/2, makeDiscussion/1, makeGrade/1, makeReview/2,
-           paper/1 [private], randomness/1 [private], randomnessGrade/1 [private], id/1 [private], gradeProof/2,
+functions: commit/2, commitRelationProof/2, makeDiscussion/2, makeGrade/1, makeReview/3,
+           paper/1 [private], randomness/1 [private], id/1 [private], gradeProof/2,
            revealSign/2 [private], getMessage/1, nonce/1 [private]
 equations: getMessage(revealSign(m, privk)) = m
 
@@ -186,23 +186,23 @@ rule Matching_3_pc_matches_paper:
 
     review_paper_commit = commit(paper(~paper), randomness(~r_review))
     submit_paper_commit = commit(paper(~paper), randomness(~r_submit))
-    matching = revealSign(<review_paper_commit, pk(~reviewer_privk), nonce(~review_nonce)>, ~pc_privk)
+    matching = revealSign(<review_paper_commit, pk(~reviewer_privk), nonce(~pc_review_nonce)>, ~pc_privk)
     matching_secret = revealSign(senc(<paper(~paper), randomness(~r_review)>, ~reviewer_key), ~pc_privk)
     commit_relation_proof = commitRelationProof(review_paper_commit, submit_paper_commit)
   in
     [!PC($PC, ~pc_privk),
-     Fr(~review_nonce),
+     Fr(~pc_review_nonce),
      !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
      !Group_For_Paper(paper(~paper), ~group_key, ~r_grade),
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      Send_Paper_To_Reviewer($Reviewer, paper(~paper)),
      Log_In(signed_encrypted_bid)]
-  --[MatchedPaper(paper(~paper), $Reviewer, nonce(~review_nonce)),
+  --[MatchedPaper(paper(~paper), $Reviewer, nonce(~pc_review_nonce)),
      OnlyOnceWith(<'Matching_4', $Reviewer, ~paper>),
      PublicLog(matching),
      PublicLog(matching_secret),
      PublicLog(commit_relation_proof)]->
-    [PC_Waiting_For_Review(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~review_nonce, randomness(~r_review)),
+    [PC_Waiting_For_Review(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~pc_review_nonce, randomness(~r_review)),
      Log_Out(matching),
      Log_Out(matching_secret),
      Log_Out(commit_relation_proof)]
@@ -214,15 +214,15 @@ Phase 3: Review
 
 rule Review_2_pc_receives_review:
   let
-  //Maybe problem with nonce
-    encrypted_review = senc(revealSign(makeReview(paper(~paper), nonce(~review_nonce)), ~reviewer_privk), ~reviewer_key)
-    commit_paper_reviewed = revealSign(<commit(paper(~paper), randomness(~r_review)), nonce(~review_nonce),'reviewed'>, ~reviewer_privk)
+    review = makeReview(paper(~paper), nonce(~pc_review_nonce), nonce(~reviewer_review_nonce))
+    encrypted_review = senc(revealSign(review, ~reviewer_privk), ~reviewer_key)
+    commit_paper_reviewed = revealSign(<commit(paper(~paper), randomness(~r_review)), nonce(~pc_review_nonce),'reviewed'>, ~reviewer_privk)
 
     encrypted_r_grade_and_group_key = senc(revealSign(<~group_key, randomness(~r_grade)>, ~pc_privk), ~reviewer_key)
-    group_message = senc(revealSign(makeReview(paper(~paper), nonce(~review_nonce)), ~reviewer_privk), ~group_key)
+    group_message = senc(revealSign(review, ~reviewer_privk), ~group_key)
   in
     [!PC($PC, ~pc_privk),
-     PC_Waiting_For_Review(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~review_nonce, randomness(~r_review)),
+     PC_Waiting_For_Review(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~pc_review_nonce, randomness(~r_review)),
      !Group_For_Paper(paper(~paper), ~group_key, ~r_grade),
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      Log_In(encrypted_review),
@@ -230,7 +230,7 @@ rule Review_2_pc_receives_review:
   --[PCReceivedReviewFromReviewer($Reviewer, paper(~paper), ~group_key, randomness(~r_grade)),
      PublicLog(encrypted_r_grade_and_group_key),
      PublicLog(group_message)]->
-    [PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~review_nonce),
+    [PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~pc_review_nonce, review),
      Log_Out(encrypted_r_grade_and_group_key),
      Log_Out(group_message)]
 
@@ -243,17 +243,17 @@ Phase 5: Decision
 
 rule Decision_1_pc_receives_discussion_and_grade:
   let
-    discussion = makeDiscussion(paper(~paper))
+    discussion = makeDiscussion(paper(~paper), ~discussion_nonce)
     grade = makeGrade(paper(~paper))
     encrypted_discussion = senc(revealSign(discussion, ~reviewer_privk), ~group_key)
     encrypted_conclusion = senc(revealSign(grade, ~reviewer_privk), ~group_key)
     commit_paper_discussed = revealSign(<commit(paper(~paper), randomness(~r_review)), 'discussed'>, ~reviewer_privk)
     signed_grade_commit = revealSign(commit(grade, randomness(~r_grade)), ~reviewer_privk)
 
-    submitter_response = revealSign(senc(<grade, revealSign(makeReview(paper(~paper), nonce(~review_nonce)), ~reviewer_privk)>, ~submitter_key), ~pc_privk)
+    feedback = revealSign(senc(<grade, revealSign(review, ~reviewer_privk)>, ~submitter_key), ~pc_privk)
   in
     [!PC($PC, ~pc_privk),
-     PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~review_nonce),
+     PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~pc_review_nonce, review),
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
      Log_In(<commit_paper_discussed, signed_grade_commit>),
@@ -261,10 +261,10 @@ rule Decision_1_pc_receives_discussion_and_grade:
      Log_In(encrypted_conclusion)]
   --[PCReceivedDiscussionFromReviewer($Reviewer, paper(~paper), ~group_key),
      OnlyOnceWith(<'Decision_1', paper(~paper), $Reviewer>),
-     PublicLog(submitter_response),
+     PublicLog(feedback),
      SubmitterKeyUsed(~submitter_key)]->
     [Ready_For_Decision(paper(~paper), grade, randomness(~r_submit), randomness(~r_review), randomness(~r_grade), ~reviewer_privk, ~group_key),
-     Log_Out(submitter_response)]
+     Log_Out(feedback)]
 
 rule Decision_2_1_pc_paper_accepted:
   let

@@ -9,8 +9,8 @@ begin
  */
 
 builtins: hashing, asymmetric-encryption, symmetric-encryption
-functions: commit/2, commitRelationProof/2, makeDiscussion/1, makeGrade/1, makeReview/3,
-           paper/1 [private], randomness/1 [private], randomnessGrade/1 [private], id/1 [private], gradeProof/2,
+functions: commit/2, commitRelationProof/2, makeDiscussion/2, makeGrade/1, makeReview/3,
+           paper/1 [private], randomness/1 [private], id/1 [private], gradeProof/2,
            revealSign/2 [private], getMessage/1, nonce/1 [private]
 equations: getMessage(revealSign(m, privk)) = m
 
@@ -296,7 +296,6 @@ rule Reviewing_1_reviewer_sends_review:
 
 rule Review_2_pc_receives_review:
   let
-  //Maybe problem with nonce
     review = makeReview(paper(~paper), nonce(~pc_review_nonce), nonce(~reviewer_review_nonce))
     encrypted_review = senc(revealSign(review, ~reviewer_privk), ~reviewer_key)
     commit_paper_reviewed = revealSign(<commit(paper(~paper), randomness(~r_review)), nonce(~pc_review_nonce),'reviewed'>, ~reviewer_privk)
@@ -327,16 +326,19 @@ rule Discussion_1_1_reviewers_discuss:
     group_message = senc(revealSign(review, ~reviewer_privk), ~group_key)
     encrypted_r_grade_and_group_key = senc(revealSign(<~group_key, randomness(~r_grade)>, ~pc_privk), ~reviewer_key)
 
-    discussion = makeDiscussion(paper(~paper))
+    discussion = makeDiscussion(paper(~paper), ~discussion_nonce)
     encrypted_discussion = senc(revealSign(discussion, ~reviewer_privk), ~group_key)
   in
-    [Log_In(group_message),
+    [Fr(~discussion_nonce),
+     Log_In(group_message),
      Log_In(encrypted_r_grade_and_group_key),
      !Reviewer_Reviewed_Paper($Reviewer, paper(~paper), randomness(~r_review)),
      !Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pc_pubk),
      Start_Discussing($Reviewer, paper(~paper), ~reviewer_review_nonce)]
   --[OnlyOnceWith(<'Discussion_1_1', $Reviewer, ~paper>),
      SymmetricKey(~group_key),
+     SecretDiscussion(discussion),
+     MadeDiscussion(paper(~paper), ~reviewer_privk),
      NotEq(~pc_privk, ~group_key)]->
     [Ended_Discussing($Reviewer, paper(~paper), randomness(~r_review), randomness(~r_grade), ~group_key),
      Reveal_Key_Other(~group_key),
@@ -366,7 +368,7 @@ Phase 5: Decision
 
 rule Decision_1_pc_receives_discussion_and_grade:
   let
-    discussion = makeDiscussion(paper(~paper))
+    discussion = makeDiscussion(paper(~paper), ~discussion_nonce)
     grade = makeGrade(paper(~paper))
     encrypted_discussion = senc(revealSign(discussion, ~reviewer_privk), ~group_key)
     encrypted_conclusion = senc(revealSign(grade, ~reviewer_privk), ~group_key)
@@ -382,7 +384,7 @@ rule Decision_1_pc_receives_discussion_and_grade:
      Log_In(<commit_paper_discussed, signed_grade_commit>),
      Log_In(encrypted_discussion),
      Log_In(encrypted_conclusion)]
-  --[PCReceivedDiscussionFromReviewer($Reviewer, paper(~paper), ~group_key),
+  --[PCReceivedDiscussion(paper(~paper), pk(~reviewer_privk)),
      OnlyOnceWith(<'Decision_1', paper(~paper), $Reviewer>),
      MadeFeedback(paper(~paper), ~pc_privk)]->
     [Ready_For_Decision(paper(~paper), grade, randomness(~r_submit), randomness(~r_review), randomness(~r_grade), ~reviewer_privk, ~group_key),
@@ -427,7 +429,6 @@ Phase 6: Claim
 
 rule Claim_1_submitter_receives_feedback:
   let
-    discussion = makeDiscussion(paper(~paper))
     grade = makeGrade(paper(~paper))
     review = makeReview(paper(~paper), nonce(~pc_review_nonce), nonce(~reviewer_review_nonce))
     feedback = revealSign(senc(<grade, revealSign(review, ~reviewer_privk)>, ~submitter_key), ~pc_privk)
@@ -556,6 +557,13 @@ lemma submitter_id_secrecy:
     PaperClaimedWithID(id) @k & k < j
 "
 
+lemma discussion_secrecy:
+"All p n #i #j.
+  SecretDiscussion(makeDiscussion(p, n)) @i &
+  KU(makeDiscussion(p, n)) @j
+==>
+  (Ex k #a. KeyRevealed(k) @a)
+"
 
 /*
 ============
@@ -588,6 +596,15 @@ lemma review_authenticity:
    ReviewerPrivateKey(r_privk) @k
 ==>
   (Ex #a. MadeReview(p, r_privk) @a) |
+  (Ex #a. KeyRevealed(r_privk) @a)
+"
+
+lemma discussion_authenticity:
+"All p r_privk #i #j.
+   PCReceivedDiscussion(p, pk(r_privk)) @i &
+   ReviewerPrivateKey(r_privk) @j
+==>
+  (Ex #a. MadeDiscussion(p, r_privk) @a) |
   (Ex #a. KeyRevealed(r_privk) @a)
 "
 
