@@ -227,9 +227,9 @@ rule Matching_1_pc_sends_paper:
 
 rule Matching_2_reviewer_sends_bids:
   let
-  	encrypted_paper = revealSign(senc(paper(~paper), ~reviewer_key), ~pc_privk)
+    encrypted_paper = revealSign(senc(paper(~paper), ~reviewer_key), ~pc_privk)
 
-  	encrypted_bid = senc(<paper(~paper), 'bid'>, ~reviewer_key)
+    encrypted_bid = senc(<paper(~paper), 'bid'>, ~reviewer_key)
     signed_encrypted_bid = revealSign(encrypted_bid, ~reviewer_privk)
   in
     [!Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pk(~pc_privk)),
