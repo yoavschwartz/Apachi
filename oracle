@@ -32,5 +32,7 @@ for line in lines:
 
     p[1].append(num)
 
-for goal in [item for sublist in p for item in sublist]:
-    print(goal)
+goals = [item for sublist in p for item in sublist]
+
+if len(goals) > 1:
+    print(goals[0])

@@ -144,12 +144,12 @@ Phase 1: Submission
 rule Submission_1_submitter_submits:
   let
     paper_commit = commit(paper(~paper), randomness(~r_submit))
-    signed_paper_commit = revealSign(paper_commit, ~submitter_privk)
+    identity_commit = commit(id(~id), randomness(~r_id))
+    signed_commits = revealSign(<paper_commit, identity_commit>, ~submitter_privk)
     submission = senc(<paper(~paper), randomness(~r_submit), randomness(~r_review)>, ~submitter_key)
-    signed_submission = revealSign(submission, ~submitter_privk)
     submission_key = aenc(~submitter_key, pk(~pc_privk))
-    signed_submission_key = revealSign(submission_key, ~submitter_privk)
-    signed_identity_commit = revealSign(commit(id(~id), randomness(~r_id)), ~submitter_privk)
+    signed_submission = revealSign(<submission, submission_key>, ~submitter_privk)
+
   in
     [Fr(~paper), Fr(~r_submit), Fr(~r_review), Fr(~r_id), Fr(~submitter_key), Fr(~submitter_privk),
      !Submitter_Ready_To_Submit(~id, pk(~pc_privk))]
@@ -160,10 +160,8 @@ rule Submission_1_submitter_submits:
      KeySecret(~submitter_privk),
      SubmitterPrivateKey(~submitter_privk),
 	   SymmetricKey(~submitter_key)]->
-    [Log_Out(signed_paper_commit),
+    [Log_Out(signed_commits),
      Log_Out(signed_submission),
-     Log_Out(signed_submission_key),
-     Log_Out(signed_identity_commit),
      Waiting_For_Feedback(~id, pk(~pc_privk), ~submitter_privk, ~submitter_key, ~paper, ~r_review, ~r_submit, ~r_id),
      Reveal_Key_Other(~submitter_key),
      Reveal_Key_Other(~submitter_privk),
@@ -172,20 +170,20 @@ rule Submission_1_submitter_submits:
 
 rule Submission_2_pc_receives_submission:
   let
-    signed_submission = revealSign(senc(<paper(~paper), randomness(~r_submit), randomness(~r_review)>, ~submitter_key), ~submitter_privk)
-    signed_submission_key = revealSign(aenc(~submitter_key, pk(~pc_privk)), ~submitter_privk)
     paper_commit = commit(paper(~paper), randomness(~r_submit))
-    signed_identity_commit = revealSign(commit(id(~id), randomness(~r_id)), ~submitter_privk)
+    identity_commit = commit(id(~id), randomness(~r_id))
+    signed_commits = revealSign(<paper_commit, identity_commit>, ~submitter_privk)
+    submission = senc(<paper(~paper), randomness(~r_submit), randomness(~r_review)>, ~submitter_key)
+    submission_key = aenc(~submitter_key, pk(~pc_privk))
+    signed_submission = revealSign(<submission, submission_key>, ~submitter_privk)
 
     signed_paper_commit = revealSign(paper_commit, ~pc_privk)
   in
     [!PC($PC, ~pc_privk),
      Fr(~group_key),
      Fr(~r_grade),
-     Log_In(signed_submission),
-     Log_In(signed_submission_key),
-     Log_In(revealSign(paper_commit, ~submitter_privk)),
-     Log_In(signed_identity_commit)]
+     Log_In(signed_commits),
+     Log_In(signed_submission)]
   --[PCReceivedPaper(~pc_privk, paper_commit),
      PCReceivedSubmissionFrom(~submitter_privk),
      OnlyOnceWith(<'Submission_2', ~paper>),
@@ -199,7 +197,7 @@ rule Submission_2_pc_receives_submission:
      GroupKey(~group_key),
      SubmitterKeyReceived(~submitter_key),
      NotEq(~r_submit, ~r_review)]->
-    [!Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
+    [!Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_commits),
      Log_Out(signed_paper_commit),
      !Group_For_Paper(paper(~paper), ~group_key, ~r_grade),
      Reveal_Key_PC(~group_key),
@@ -215,10 +213,10 @@ Phase 2: Matching
 
 rule Matching_1_pc_sends_paper:
   let
-    encrypted_paper = revealSign(senc(paper(~paper), ~reviewer_key), ~pc_privk)
+    encrypted_paper = senc(revealSign(paper(~paper), ~pc_privk), ~reviewer_key)
   in
     [!PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
-     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
+     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_commits),
      !PC($PC, ~pc_privk)]
   --[OnlyOnceWith(<'Matching_1', $Reviewer, ~paper>),
      PCSendsPaperToReviewer($Reviewer, paper(~paper))]->
@@ -227,22 +225,20 @@ rule Matching_1_pc_sends_paper:
 
 rule Matching_2_reviewer_sends_bids:
   let
-    encrypted_paper = revealSign(senc(paper(~paper), ~reviewer_key), ~pc_privk)
+    encrypted_paper = senc(revealSign(paper(~paper), ~pc_privk), ~reviewer_key)
 
-    encrypted_bid = senc(<paper(~paper), 'bid'>, ~reviewer_key)
-    signed_encrypted_bid = revealSign(encrypted_bid, ~reviewer_privk)
+    encrypted_bid = senc(revealSign(<paper(~paper), 'bid'>, ~reviewer_privk), ~reviewer_key)
   in
     [!Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pk(~pc_privk)),
      Log_In(encrypted_paper)]
   --[BidOnPaper($Reviewer, paper(~paper)),
      OnlyOnceWith(<'Matching_2', $Reviewer, ~paper>)]->
     [!Reviewer_Bid_On_Paper($Reviewer, paper(~paper)),
-     Log_Out(signed_encrypted_bid)]
+     Log_Out(encrypted_bid)]
 
 rule Matching_3_pc_matches_paper:
   let
-    encrypted_bid = senc(<paper(~paper), 'bid'>, ~reviewer_key)
-    signed_encrypted_bid = revealSign(encrypted_bid, ~reviewer_privk)
+    encrypted_bid = senc(revealSign(<paper(~paper), 'bid'>, ~reviewer_privk), ~reviewer_key)
 
     review_paper_commit = commit(paper(~paper), randomness(~r_review))
     submit_paper_commit = commit(paper(~paper), randomness(~r_submit))
@@ -252,11 +248,11 @@ rule Matching_3_pc_matches_paper:
   in
     [!PC($PC, ~pc_privk),
      Fr(~pc_review_nonce),
-     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
+     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_commits),
      !Group_For_Paper(paper(~paper), ~group_key, ~r_grade),
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
      Send_Paper_To_Reviewer($Reviewer, paper(~paper)),
-     Log_In(signed_encrypted_bid)]
+     Log_In(encrypted_bid)]
   --[MatchedPaper(paper(~paper), $Reviewer, nonce(~pc_review_nonce)),
      OnlyOnceWith(<'Matching_4', $Reviewer, ~paper>)]->
     [PC_Waiting_For_Review(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~pc_review_nonce, randomness(~r_review)),
@@ -278,7 +274,7 @@ rule Reviewing_1_reviewer_sends_review:
 
     review = makeReview(paper(~paper), nonce(~pc_review_nonce), nonce(~reviewer_review_nonce))
   	encrypted_review = senc(revealSign(review, ~reviewer_privk), ~reviewer_key)
-  	commit_paper_reviewed = revealSign(<commit(paper(~paper), randomness(~r_review)), nonce(~pc_review_nonce),'reviewed'>, ~reviewer_privk)
+  	commit_paper_reviewed = revealSign(<review_paper_commit, nonce(~pc_review_nonce)>, ~reviewer_privk)
   in
     [Fr(~reviewer_review_nonce),
      !Reviewer_Bid_On_Paper($Reviewer, paper(~paper)),
@@ -297,8 +293,9 @@ rule Reviewing_1_reviewer_sends_review:
 rule Review_2_pc_receives_review:
   let
     review = makeReview(paper(~paper), nonce(~pc_review_nonce), nonce(~reviewer_review_nonce))
-    encrypted_review = senc(revealSign(review, ~reviewer_privk), ~reviewer_key)
-    commit_paper_reviewed = revealSign(<commit(paper(~paper), randomness(~r_review)), nonce(~pc_review_nonce),'reviewed'>, ~reviewer_privk)
+    signed_review = revealSign(review, ~reviewer_privk)
+    encrypted_review = senc(signed_review, ~reviewer_key)
+    commit_paper_reviewed = revealSign(<commit(paper(~paper), randomness(~r_review)), nonce(~pc_review_nonce)>, ~reviewer_privk)
 
     encrypted_r_grade_and_group_key = senc(revealSign(<~group_key, randomness(~r_grade)>, ~pc_privk), ~reviewer_key)
     group_message = senc(revealSign(review, ~reviewer_privk), ~group_key)
@@ -310,7 +307,7 @@ rule Review_2_pc_receives_review:
      Log_In(encrypted_review),
      Log_In(commit_paper_reviewed)]
   --[PCReceivedReviewFromReviewer($Reviewer, paper(~paper), ~group_key, randomness(~r_grade))]->
-    [PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~pc_review_nonce, review),
+    [PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~pc_review_nonce, signed_review),
      Log_Out(encrypted_r_grade_and_group_key),
      Log_Out(group_message)]
 
@@ -340,7 +337,7 @@ rule Discussion_1_1_reviewers_discuss:
      SecretDiscussion(discussion),
      MadeDiscussion(paper(~paper), ~reviewer_privk),
      NotEq(~pc_privk, ~group_key)]->
-    [Ended_Discussing($Reviewer, paper(~paper), randomness(~r_review), randomness(~r_grade), ~group_key),
+    [Ended_Discussing($Reviewer, paper(~paper), randomness(~r_review), randomness(~r_grade), nonce(~pc_review_nonce), ~group_key),
      Reveal_Key_Other(~group_key),
      Log_Out(encrypted_discussion)]
 
@@ -348,16 +345,17 @@ rule Discussion_1_2_finished_discussing:
   let
   	grade = makeGrade(paper(~paper))
     encrypted_conclusion = senc(revealSign(grade, ~reviewer_privk), ~group_key)
+
   	paper_review_commit = commit(paper(~paper), randomness(~r_review))
-  	commit_paper_discussed = revealSign(<paper_review_commit, 'discussed'>, ~reviewer_privk)
-  	signed_grade_commit = revealSign(commit(grade, randomness(~r_grade)), ~reviewer_privk)
+  	grade_commit = commit(grade, randomness(~r_grade))
+  	signed_commits = revealSign(<paper_review_commit, grade_commit, nonce(~pc_review_nonce)>, ~reviewer_privk)
   in
-    [Ended_Discussing($Reviewer, paper(~paper), randomness(~r_review), randomness(~r_grade), ~group_key),
+    [Ended_Discussing($Reviewer, paper(~paper), randomness(~r_review), randomness(~r_grade), nonce(~pc_review_nonce), ~group_key),
      !Reviewer($Reviewer, ~reviewer_key, ~reviewer_privk, pk(~pc_privk))]
   --[OnlyOnceWith(<'Discussion_1_2', ~paper>),
      DiscussedPaper($Reviewer, paper(~paper))]->
     [Log_Out(encrypted_conclusion),
-     Log_Out(<commit_paper_discussed, signed_grade_commit>)]
+     Log_Out(signed_commits)]
 
 
 /*
@@ -372,18 +370,19 @@ rule Decision_1_pc_receives_discussion_and_grade:
     grade = makeGrade(paper(~paper))
     encrypted_discussion = senc(revealSign(discussion, ~reviewer_privk), ~group_key)
     encrypted_conclusion = senc(revealSign(grade, ~reviewer_privk), ~group_key)
-    commit_paper_discussed = revealSign(<commit(paper(~paper), randomness(~r_review)), 'discussed'>, ~reviewer_privk)
-    signed_grade_commit = revealSign(commit(grade, randomness(~r_grade)), ~reviewer_privk)
+  	paper_review_commit = commit(paper(~paper), randomness(~r_review))
+  	grade_commit = commit(grade, randomness(~r_grade))
+  	signed_commits = revealSign(<paper_review_commit, grade_commit>, ~reviewer_privk)
 
-    feedback = revealSign(senc(<grade, revealSign(review, ~reviewer_privk)>, ~submitter_key), ~pc_privk)
+    feedback = senc(revealSign(<grade, signed_review>, ~pc_privk), ~submitter_key)
   in
     [!PC($PC, ~pc_privk),
-     PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~pc_review_nonce, review),
+     PC_Waiting_For_Discussion(paper(~paper), randomness(~r_grade), $Reviewer, ~group_key, ~pc_review_nonce, signed_review),
      !PC_Reviewer_Association($Reviewer, ~reviewer_key, pk(~reviewer_privk)),
-     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
-     Log_In(<commit_paper_discussed, signed_grade_commit>),
+     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_submission_commits),
      Log_In(encrypted_discussion),
-     Log_In(encrypted_conclusion)]
+     Log_In(encrypted_conclusion),
+     Log_In(signed_commits)]
   --[PCReceivedDiscussion(paper(~paper), pk(~reviewer_privk)),
      OnlyOnceWith(<'Decision_1', paper(~paper), $Reviewer>),
      MadeFeedback(paper(~paper), ~pc_privk)]->
@@ -392,7 +391,7 @@ rule Decision_1_pc_receives_discussion_and_grade:
 
 rule Decision_2_1_pc_paper_accepted:
   let
-    accepted = <paper(~paper), randomness(~r_submit), randomness(~r_review)>
+    accepted = <paper(~paper), randomness(~r_submit)>
     accepted_out = revealSign(accepted, ~pc_privk)
     grade = makeGrade(paper(~paper))
     signed_grade = revealSign(grade, ~pc_privk)
@@ -431,7 +430,8 @@ rule Claim_1_submitter_receives_feedback:
   let
     grade = makeGrade(paper(~paper))
     review = makeReview(paper(~paper), nonce(~pc_review_nonce), nonce(~reviewer_review_nonce))
-    feedback = revealSign(senc(<grade, revealSign(review, ~reviewer_privk)>, ~submitter_key), ~pc_privk)
+    signed_review = revealSign(review, ~reviewer_privk)
+    feedback = senc(revealSign(<grade, signed_review>, ~pc_privk), ~submitter_key)
     review_paper_commit = commit(paper(~paper), randomness(~r_review))
     matching = revealSign(<review_paper_commit, pk(~reviewer_privk), nonce(~pc_review_nonce)>, ~pc_privk)
   in
@@ -443,7 +443,7 @@ rule Claim_1_submitter_receives_feedback:
 
 rule Claim_2_submitter_claims_paper:
   let
-    accepted = <paper(~paper), randomness(~r_submit), randomness(~r_review)>
+    accepted = <paper(~paper), randomness(~r_submit)>
     accepted_out = revealSign(accepted, ~pc_privk)
 
     signed_paper_claim = revealSign(<paper(~paper), id(~id), randomness(~r_id)>, ~submitter_privk)
@@ -457,12 +457,14 @@ rule Claim_2_submitter_claims_paper:
 rule Claim_3_PC_confirms_paper_ownership:
   let
     signed_paper_claim = revealSign(<paper(~paper), id(~id), randomness(~r_id)>, ~submitter_privk)
-    signed_identity_commit = revealSign(commit(id(~id), randomness(~r_id)), ~submitter_privk)
+    paper_commit = commit(paper(~paper), randomness(~r_submit))
+    identity_commit = commit(id(~id), randomness(~r_id))
+    signed_commits = revealSign(<paper_commit, identity_commit>, ~submitter_privk)
 
     signed_paper_claim_confirmation = revealSign(<paper(~paper), id(~id), randomness(~r_id)>, ~pc_privk)
   in
     [!PC($PC, ~pc_privk),
-     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_identity_commit),
+     !Received_Submission(paper(~paper), randomness(~r_submit), randomness(~r_review), ~submitter_key, signed_commits),
      Waiting_For_Paper_Claim(~paper),
      Log_In(signed_paper_claim)]
   --[RId(~r_id),
