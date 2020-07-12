@@ -1,0 +1,40 @@
+theory x_observational_paper
+begin
+
+/*
+ *  Author: Yoav S. & Nicolai S.
+ *  Model Name: untrusted_reviewers.spthy
+ *  Status: DEVELOPMENTAL
+ *
+ */
+
+builtins: asymmetric-encryption, symmetric-encryption
+functions: commit/2, paper/1, randomness/1, id/1, revealSign/2, getMessage/1
+equations: getMessage(revealSign(m, privk)) = m
+
+rule Setup:
+    [Fr(~p1), Fr(~p2), Fr(~pc_privk)]
+  --[]->
+    [SubmitterPaper(diff(~p1, ~p2)),
+     !PC_privk(~pc_privk),
+     Out(<~p1, ~p2>)]
+
+rule Submission:
+  let
+    paper_commit = commit(paper(~paper), randomness(~r_submit))
+    identity_commit = commit(id(~submitter_id), randomness(~r_id))
+    signed_commits = revealSign(<paper_commit, identity_commit>, ~submitter_privk)
+
+    submission = senc(<paper(submitted_paper), randomness(~r_submit), randomness(~r_review)>, ~submitter_key)
+    submission_key = aenc(~submitter_key, pk(~pc_privk))
+    signed_submission = revealSign(<submission, submission_key>, ~submitter_privk)
+  in
+    [Fr(~paper), Fr(~r_submit), Fr(~r_review), Fr(~r_id), Fr(~submitter_key), Fr(~submitter_privk), Fr(~submitter_id),
+     !PC_privk(~pc_privk),
+     SubmitterPaper(submitted_paper)]
+  --[]->
+    [Out(signed_commits),
+     Out(signed_submission),
+     Out(<~submitter_privk>)]
+
+end
