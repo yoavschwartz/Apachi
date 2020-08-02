@@ -372,7 +372,7 @@ rule Decision_1_pc_receives_discussion_and_grade:
     encrypted_conclusion = senc(revealSign(grade, ~reviewer_privk), ~group_key)
   	paper_review_commit = commit(paper(~paper), randomness(~r_review))
   	grade_commit = commit(grade, randomness(~r_grade))
-  	signed_commits = revealSign(<paper_review_commit, grade_commit>, ~reviewer_privk)
+  	signed_commits = revealSign(<paper_review_commit, grade_commit, nonce(~pc_review_nonce)>, ~reviewer_privk)
 
     feedback = senc(revealSign(<grade, signed_review>, ~pc_privk), ~submitter_key)
   in
@@ -578,8 +578,8 @@ lemma acceptance_authenticity:
    KU(revealSign(<p, r_submit, r_review>, pc_privk)) @i &
    PCReceivedPaper(pc_privk, commit(p, r_submit)) @j
 ==>
-  (Ex #a. KeyRevealedPC(pc_privk) @a) |
-  (Ex #a. PaperAccepted(commit(p, r_review)) @a)
+  (Ex #a. KeyRevealedPC(pc_privk) @a & #a < #i) |
+  (Ex #a. PaperAccepted(commit(p, r_review)) @a & #a < #i)
 "
 
 lemma rejection_authenticity:
@@ -587,8 +587,8 @@ lemma rejection_authenticity:
    KU(revealSign(<commit(p, r_review), r_grade, makeGrade(p)>, pc_privk)) @i &
    PCPrivk(pc_privk) @j
 ==>
-  (Ex #a. KeyRevealedPC(pc_privk) @a) |
-  (Ex #a. PaperRejected(commit(p, r_review)) @a)
+  (Ex #a. KeyRevealedPC(pc_privk) @a & #a < #i) |
+  (Ex #a. PaperRejected(commit(p, r_review)) @a & #a < #i)
 "
 
 lemma review_authenticity:
@@ -597,8 +597,8 @@ lemma review_authenticity:
    PCPrivk(pc_privk) @j &
    ReviewerPrivateKey(r_privk) @k
 ==>
-  (Ex #a. MadeReview(p, r_privk) @a) |
-  (Ex #a. KeyRevealed(r_privk) @a)
+  (Ex #a. MadeReview(p, r_privk) @a & #a < #i) |
+  (Ex #a. KeyRevealed(r_privk) @a & #a < #i)
 "
 
 lemma discussion_authenticity:
@@ -606,8 +606,8 @@ lemma discussion_authenticity:
    PCReceivedDiscussion(p, pk(r_privk)) @i &
    ReviewerPrivateKey(r_privk) @j
 ==>
-  (Ex #a. MadeDiscussion(p, r_privk) @a) |
-  (Ex #a. KeyRevealed(r_privk) @a)
+  (Ex #a. MadeDiscussion(p, r_privk) @a & #a < #i) |
+  (Ex #a. KeyRevealed(r_privk) @a & #a < #i)
 "
 
 
@@ -618,15 +618,13 @@ Non-transferability
 */
 
 lemma non_transferability_of_paper:
-"All p id s_privk #i #j.
-  PublishedPaper(p, id, pk(s_privk)) @i &
-  SubmitterPrivateKey(s_privk) @j &
-  not(Ex #b. KeyRevealed(s_privk) @b)
+"All p id r_s s_privk pc_privk #i #j.
+  PublishedPaper(p, id, pk(s_privk)) @i & 
+  PCReceivedPaper(pc_privk, commit(p, r_s)) @j
 ==>
-  (Ex r_id #a.
-    SubmittedPaper(s_privk, p) @a &
-    SubmittedPaperWithID(id, r_id) @a
-  )
+  Ex r_id #a.
+    PublicLog(revealSign(<commit(p, r_s), commit(id, r_id)>, s_privk)) @a &
+    #a < #j
 "
 
 
