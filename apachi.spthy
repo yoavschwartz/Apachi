@@ -1,9 +1,9 @@
-theory x
+theory apachi
 begin
 
 /*
  *  Author: Yoav S. & Nicolai S.
- *  Model Name: untrusted_reviewers.spthy
+ *  Model Name: apachi.spthy
  *  Status: DEVELOPMENTAL
  *
  */

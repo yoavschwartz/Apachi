@@ -1,9 +1,9 @@
-theory x_accountability
+theory apachi_accountability
 begin
 
 /*
  *  Author: Yoav S. & Nicolai S.
- *  Model Name: untrusted_reviewers.spthy
+ *  Model Name: apachi_accountability.spthy
  *  Status: DEVELOPMENTAL
  *
  */

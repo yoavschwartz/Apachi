@@ -1,9 +1,9 @@
-theory x_observational_paper
+theory apachi_observational_id
 begin
 
 /*
  *  Author: Yoav S. & Nicolai S.
- *  Model Name: untrusted_reviewers.spthy
+ *  Model Name: apachi_observational_id.spthy
  *  Status: DEVELOPMENTAL
  *
  */
@@ -13,28 +13,28 @@ functions: commit/2, paper/1, randomness/1, id/1, revealSign/2, getMessage/1
 equations: getMessage(revealSign(m, privk)) = m
 
 rule Setup:
-    [Fr(~p1), Fr(~p2), Fr(~pc_privk)]
+    [Fr(~id1), Fr(~id2), Fr(~pc_privk)]
   --[]->
-    [SubmitterPaper(diff(~p1, ~p2)),
+    [SubmitterId(~id1), SubmitterId(diff(~id1, ~id2)),
      !PC_privk(~pc_privk),
-     Out(<~p1, ~p2>)]
+     Out(<~id1, ~id2>)]
 
 rule Submission:
   let
     paper_commit = commit(paper(~paper), randomness(~r_submit))
-    identity_commit = commit(id(~submitter_id), randomness(~r_id))
+    identity_commit = commit(id(submitter_id), randomness(~r_id))
     signed_commits = revealSign(<paper_commit, identity_commit>, ~submitter_privk)
 
-    submission = senc(<paper(submitted_paper), randomness(~r_submit), randomness(~r_review)>, ~submitter_key)
+    submission = senc(<paper(~paper), randomness(~r_submit), randomness(~r_review)>, ~submitter_key)
     submission_key = aenc(~submitter_key, pk(~pc_privk))
     signed_submission = revealSign(<submission, submission_key>, ~submitter_privk)
   in
-    [Fr(~paper), Fr(~r_submit), Fr(~r_review), Fr(~r_id), Fr(~submitter_key), Fr(~submitter_privk), Fr(~submitter_id),
+    [Fr(~paper), Fr(~r_submit), Fr(~r_review), Fr(~r_id), Fr(~submitter_key), Fr(~submitter_privk),
      !PC_privk(~pc_privk),
-     SubmitterPaper(submitted_paper)]
+     SubmitterId(submitter_id)]
   --[]->
     [Out(signed_commits),
      Out(signed_submission),
-     Out(<~submitter_privk>)]
+     Out(<~pc_privk, ~submitter_privk>)]
 
 end
